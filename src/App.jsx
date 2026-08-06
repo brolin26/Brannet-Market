@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowUpRight,
+  Archive,
   Bookmark,
   Box,
   Check,
@@ -320,6 +321,14 @@ function Header({
         <Logo />
       </button>
       <nav className="main-nav">
+        {user.role === "admin" && (
+          <button
+            className={view === "admin" ? "active" : ""}
+            onClick={() => setView("admin")}
+          >
+            <ShieldCheck size={17} /> Admin Panel
+          </button>
+        )}
         <button
           className={view === "explore" ? "active" : ""}
           onClick={() => setView("explore")}
@@ -332,20 +341,12 @@ function Header({
         >
           <Zap size={17} /> Free
         </button>
-        {user.role === "designer" && (
+        {user.role === "creator" && (
           <button
             className={view === "editor" ? "active" : ""}
             onClick={() => setView("editor")}
           >
             <Pencil size={17} /> Edit Tool
-          </button>
-        )}
-        {user.role === "admin" && (
-          <button
-            className={view === "admin" ? "active" : ""}
-            onClick={() => setView("admin")}
-          >
-            <Settings size={17} /> Review
           </button>
         )}
       </nav>
@@ -1274,8 +1275,11 @@ function Dashboard({
   );
 }
 
-function CreatorStudio({ products, onPublish }) {
+function CreatorStudio({ products, onPublish, onArchive, onDelete }) {
   const [uploading, setUploading] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [sortBy, setSortBy] = useState("newest");
+  const [menuId, setMenuId] = useState(null);
   const [form, setForm] = useState({
     title: "",
     category: "UI / UX",
@@ -1294,10 +1298,11 @@ function CreatorStudio({ products, onPublish }) {
     },
     [previewUrl],
   );
-  const publish = (e) => {
+  const publish = (e, status = "pending") => {
     e.preventDefault();
-    if (!form.title.trim() || !form.file || !form.preview) return;
-    onPublish(form);
+    if (!form.title.trim()) return;
+    if (status === "pending" && (!form.file || !form.preview)) return;
+    onPublish(form, status);
     setUploading(false);
     setForm({
       title: "",
@@ -1308,6 +1313,9 @@ function CreatorStudio({ products, onPublish }) {
       preview: null,
     });
   };
+  const shownProducts = [...products]
+    .filter((item) => statusFilter === "all" || item.status === statusFilter)
+    .sort((a, b) => sortBy === "sales" ? b.sales - a.sales : sortBy === "price" ? b.price - a.price : String(b.id).localeCompare(String(a.id)));
   return (
     <main className="creator-shell">
       <div className="creator-hero">
@@ -1324,7 +1332,7 @@ function CreatorStudio({ products, onPublish }) {
           </span>
         </div>
         <button className="primary" onClick={() => setUploading(true)}>
-          <Plus size={18} /> New product
+          <Plus size={18} /> New Asset
         </button>
       </div>
       <div className="creator-stats">
@@ -1334,7 +1342,7 @@ function CreatorStudio({ products, onPublish }) {
           <small>+18.4% this month</small>
         </div>
         <div>
-          <p>Product views</p>
+          <p>Asset views</p>
           <strong>18.2k</strong>
           <small>Across all products</small>
         </div>
@@ -1352,24 +1360,23 @@ function CreatorStudio({ products, onPublish }) {
       <section className="creator-products">
         <div className="section-title">
           <div>
-            <p className="eyebrow">YOUR PRODUCTS</p>
-            <h2>Published work</h2>
+            <p className="eyebrow">YOUR ASSETS</p>
+            <h2>Uploaded work</h2>
           </div>
           <div className="creator-tabs">
-            <button className="active">All</button>
-            <button>Published</button>
-            <button>Drafts</button>
+            {[["all","All"],["approved","Approved"],["pending","In review"],["draft","Drafts"]].map(([id,label]) => <button key={id} className={statusFilter === id ? "active" : ""} onClick={() => setStatusFilter(id)}>{label}</button>)}
+            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)}><option value="newest">Newest</option><option value="sales">Sales</option><option value="price">Price</option></select>
           </div>
         </div>
         <div className="product-table">
           <div className="table-head">
-            <span>Product</span>
+            <span>Asset</span>
             <span>Price</span>
             <span>Performance</span>
             <span>Status</span>
             <span />
           </div>
-          {products.slice(0, 5).map((item) => (
+          {shownProducts.map((item) => (
             <article key={item.id}>
               <div className="product-cell">
                 <img src={item.image} />
@@ -1386,13 +1393,18 @@ function CreatorStudio({ products, onPublish }) {
               <span className={`status-live ${item.status}`}>
                 {item.status === "pending"
                   ? "In review"
+                  : item.status === "draft"
+                    ? "Draft"
+                    : item.status === "archived"
+                      ? "Archived"
                   : item.status === "rejected"
                     ? "Needs changes"
                     : "Published"}
               </span>
-              <button>
+              <button onClick={() => setMenuId(menuId === item.id ? null : item.id)}>
                 <MoreDots />
               </button>
+              {menuId === item.id && <div className="asset-menu"><button onClick={() => { onArchive(item.id); setMenuId(null); }}><Archive size={14}/> Archive</button><button className="danger-action" onClick={() => { onDelete(item.id); setMenuId(null); }}><Trash2 size={14}/> Delete</button></div>}
             </article>
           ))}
         </div>
@@ -1402,8 +1414,8 @@ function CreatorStudio({ products, onPublish }) {
           <form className="publish-modal" onSubmit={publish}>
             <div className="modal-head">
               <div>
-                <p>NEW PRODUCT</p>
-                <h2>Publish your work</h2>
+                <p>NEW ASSET</p>
+                <h2>Submit an asset</h2>
               </div>
               <button type="button" onClick={() => setUploading(false)}>
                 <X size={20} />
@@ -1437,19 +1449,19 @@ function CreatorStudio({ products, onPublish }) {
                 <b>{form.preview ? "Replace preview" : "Choose image"}</b>
               </div>
             </label>
-            <p className="upload-label">2. Downloadable product</p>
+            <p className="upload-label">2. Original asset files</p>
             <label className="upload-drop product-file">
               <input
                 type="file"
                 required
-                accept=".zip,.fig,.psd,.ai,.ae,.blend,.obj,.pdf"
+                accept=".zip"
                 onChange={(e) => setForm({ ...form, file: e.target.files[0] })}
               />
               <span>
                 {form.file ? <Check size={23} /> : <Upload size={23} />}
               </span>
               <strong>
-                {form.file ? form.file.name : "Drop your product files here"}
+                {form.file ? form.file.name : "Upload your original files as ZIP"}
               </strong>
               <p>
                 {form.file
@@ -1459,11 +1471,11 @@ function CreatorStudio({ products, onPublish }) {
               <b>{form.file ? "Replace file" : "Choose file"}</b>
             </label>
             <label>
-              Product title
+              Asset title
               <input
                 value={form.title}
                 onChange={(e) => setForm({ ...form, title: e.target.value })}
-                placeholder="Give your product a clear name"
+                placeholder="Give your asset a clear name"
               />
             </label>
             <div className="form-row">
@@ -1490,7 +1502,6 @@ function CreatorStudio({ products, onPublish }) {
                 >
                   <option>Paid</option>
                   <option>Free</option>
-                  <option>Showcase only</option>
                 </select>
               </label>
             </div>
@@ -1505,7 +1516,7 @@ function CreatorStudio({ products, onPublish }) {
               </label>
             )}
             <div className="publish-actions">
-              <button type="button" onClick={() => setUploading(false)}>
+              <button type="button" onClick={(e) => publish(e, "draft")}>
                 Save draft
               </button>
               <button className="primary" type="submit">
@@ -1529,29 +1540,27 @@ function ProfileMenu({ close, setView, user, onSignOut }) {
           <small>{user.email}</small>
         </span>
       </div>
-      <button
-        onClick={() => {
-          setView("dashboard");
-          close();
-        }}
-      >
-        <LayoutDashboard size={17} /> Dashboard
+      {user.role === "admin" && (
+        <button onClick={() => { setView("admin"); close(); }}>
+          <ShieldCheck size={17} /> Admin Panel
+        </button>
+      )}
+      <button onClick={() => { setView("profile"); close(); }}>
+        <User size={17} /> Profile
       </button>
       <button
         onClick={() => {
-          setView("spaces");
+          setView("account-spaces");
           close();
         }}
       >
         <Box size={17} /> My Spaces
       </button>
-      <button
-        onClick={() => {
-          setView("profile");
-          close();
-        }}
-      >
-        <User size={17} /> Profile
+      <button onClick={() => { setView("downloads"); close(); }}>
+        <Download size={17} /> My Downloads
+      </button>
+      <button onClick={() => { setView("billing"); close(); }}>
+        <Package size={17} /> Plan &amp; Billing
       </button>
       <button
         onClick={() => {
@@ -1561,7 +1570,7 @@ function ProfileMenu({ close, setView, user, onSignOut }) {
       >
         <Settings size={17} /> Preferences
       </button>
-      {user.role === "designer" && (
+      {user.role === "creator" && (
         <>
           <i />
           <button
@@ -1570,7 +1579,7 @@ function ProfileMenu({ close, setView, user, onSignOut }) {
               close();
             }}
           >
-            <Sparkles size={17} /> Sell / Creator Studio
+            <Sparkles size={17} /> Creator Studio
           </button>
           <button
             onClick={() => {
@@ -1581,16 +1590,6 @@ function ProfileMenu({ close, setView, user, onSignOut }) {
             <Pencil size={17} /> Edit Tool
           </button>
         </>
-      )}{" "}
-      {user.role === "admin" && (
-        <button
-          onClick={() => {
-            setView("admin");
-            close();
-          }}
-        >
-          <ShieldCheck size={17} /> Admin review
-        </button>
       )}
       <i />
       <button onClick={onSignOut}>
@@ -1601,16 +1600,16 @@ function ProfileMenu({ close, setView, user, onSignOut }) {
 }
 
 const demoUsers = {
-  user: {
+  explorer: {
     name: "Mia Carter",
     email: "mia@metainspo.co",
-    role: "user",
+    role: "explorer",
     initials: "MC",
   },
-  designer: {
+  creator: {
     name: "Alex Morgan",
     email: "alex@studio.co",
-    role: "designer",
+    role: "creator",
     initials: "AM",
   },
   admin: {
@@ -1623,7 +1622,7 @@ const demoUsers = {
 
 function AuthScreen({ onAuth }) {
   const [mode, setMode] = useState("signin");
-  const [role, setRole] = useState("user");
+  const [role, setRole] = useState("explorer");
   const [form, setForm] = useState({ name: "", email: "", password: "" });
   const submit = (e) => {
     e.preventDefault();
@@ -1735,23 +1734,23 @@ function AuthScreen({ onAuth }) {
             <div>
               <button
                 type="button"
-                className={role === "user" ? "active" : ""}
-                onClick={() => setRole("user")}
+                className={role === "explorer" ? "active" : ""}
+                onClick={() => setRole("explorer")}
               >
                 <Compass size={17} />
                 <span>
-                  <strong>Explore</strong>
+                  <strong>Explorer</strong>
                   <small>Browse & download</small>
                 </span>
               </button>
               <button
                 type="button"
-                className={role === "designer" ? "active" : ""}
-                onClick={() => setRole("designer")}
+                className={role === "creator" ? "active" : ""}
+                onClick={() => setRole("creator")}
               >
                 <Sparkles size={17} />
                 <span>
-                  <strong>Create</strong>
+                  <strong>Creator</strong>
                   <small>Upload & sell</small>
                 </span>
               </button>
@@ -1803,32 +1802,22 @@ function AccountCenter({
   onDownload,
   setView,
   onUpdateUser,
+  onCreateSpace,
+  onDeleteSpace,
 }) {
   const [tab, setTab] = useState(initialTab || "overview");
   useEffect(() => setTab(initialTab || "overview"), [initialTab]);
   const nav = [
-    { id: "overview", label: "Overview", icon: Grid2X2 },
     { id: "spaces", label: "My Spaces", icon: Box, count: spaces.length },
     {
-      id: "shared",
-      label: "Shared with me",
-      icon: Share2,
-      count: sharedSpaces.length,
-    },
-    {
-      id: "saved",
-      label: "Saved ideas",
-      icon: Bookmark,
-      count: savedItems.length,
-    },
-    {
       id: "downloads",
-      label: "Downloads",
+      label: "My Downloads",
       icon: Download,
       count: ownedItems.length,
     },
     { id: "profile", label: "Profile", icon: User },
-    { id: "settings", label: "Settings", icon: Settings },
+    { id: "billing", label: "Plan & Billing", icon: Package },
+    { id: "settings", label: "Preferences", icon: Settings },
   ];
   const titles = {
     overview: "Your creative world",
@@ -1836,8 +1825,9 @@ function AccountCenter({
     shared: "Shared with me",
     saved: "Saved ideas",
     downloads: "Downloads",
-    profile: "Public profile",
-    settings: "Settings",
+    profile: user.role === "explorer" ? "Private profile" : "Creator profile",
+    billing: "Plan & Billing",
+    settings: "Preferences",
   };
   return (
     <main className="account-shell">
@@ -1865,7 +1855,7 @@ function AccountCenter({
             );
           })}
         </nav>
-        {user.role === "designer" && (
+        {user.role === "creator" && (
           <button
             className="studio-shortcut"
             onClick={() => setView("creator")}
@@ -1916,7 +1906,14 @@ function AccountCenter({
             />
           </>
         )}
-        {tab === "spaces" && <SpacesMini spaces={spaces} catalog={catalog} />}
+        {tab === "spaces" && (
+          <SpacesMini
+            spaces={spaces}
+            catalog={catalog}
+            onCreate={onCreateSpace}
+            onDelete={onDeleteSpace}
+          />
+        )}
         {tab === "shared" && (
           <SpacesMini spaces={sharedSpaces} catalog={catalog} shared />
         )}
@@ -1958,6 +1955,15 @@ function AccountCenter({
         {tab === "profile" && (
           <ProfileEditor user={user} onSave={onUpdateUser} />
         )}
+        {tab === "billing" && (
+          <section className="settings-card billing-card">
+            <p className="eyebrow">CURRENT PLAN</p>
+            <h2>Explorer Free</h2>
+            <p>Save unlimited inspiration spaces and download free assets. Upgrade when you need premium commercial assets.</p>
+            <div className="setting-row"><span>Billing cycle</span><strong>No active subscription</strong></div>
+            <button className="primary">View available plans</button>
+          </section>
+        )}
         {tab === "settings" && <SettingsPanel user={user} />}
       </div>
     </main>
@@ -1993,13 +1999,25 @@ function ContentGrid({ title, items, onSelect, empty }) {
     </section>
   );
 }
-function SpacesMini({ spaces, catalog, shared }) {
+function SpacesMini({ spaces, catalog, shared, onCreate, onDelete }) {
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState("");
+  const create = (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    onCreate?.(name.trim());
+    setName("");
+    setCreating(false);
+  };
   return (
-    <div className="account-spaces">
+    <>
+      {!shared && <div className="spaces-actions"><button className="primary" onClick={() => setCreating(true)}><Plus size={16}/> New space</button></div>}
+      {creating && <form className="new-space-form" onSubmit={create}><input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Space title"/><button className="primary">Create space</button><button type="button" onClick={() => setCreating(false)}>Cancel</button></form>}
+      <div className="account-spaces">
       {spaces.map((space, i) => (
-        <article key={space.id}>
+        <article key={space.id} className="space-card">
           <div>
-            {space.covers.map((id, j) => (
+            {space.covers.length ? space.covers.map((id, j) => (
               <img
                 key={j}
                 src={
@@ -2009,15 +2027,16 @@ function SpacesMini({ spaces, catalog, shared }) {
                   ).image
                 }
               />
-            ))}
+            )) : <span className="empty-space-cover"><ImageIcon size={28}/><small>The first saved asset becomes the cover</small></span>}
           </div>
-          <h3>{space.name}</h3>
+          <header><h3>{space.name}</h3>{!shared && <button title="Delete space" onClick={() => onDelete?.(space.id)}><Trash2 size={15}/></button>}</header>
           <p>
             {space.count} ideas {shared ? "· Shared by North Studio" : ""}
           </p>
         </article>
       ))}
-    </div>
+      </div>
+    </>
   );
 }
 function EmptyAccount({ icon: Icon, text }) {
@@ -2033,15 +2052,19 @@ function EmptyAccount({ icon: Icon, text }) {
 }
 function ProfileEditor({ user, onSave }) {
   const [name, setName] = useState(user.name);
+  const [bio, setBio] = useState(user.bio || "");
+  const [location, setLocation] = useState(user.location || "");
+  const [url, setUrl] = useState(user.url || "");
+  const [photo, setPhoto] = useState(user.photo || "");
   return (
     <section className="settings-card">
       <div className="profile-edit-head">
-        <Avatar initials={user.initials} />
+        {photo ? <img className="profile-photo" src={photo} alt="Profile"/> : <Avatar initials={user.initials} />}
         <div>
           <h3>{user.name}</h3>
-          <p>metainspo.com/{user.name.toLowerCase().replaceAll(" ", "")}</p>
+          <p>{user.role === "explorer" ? "Private profile · not searchable" : `metainspo.com/${user.name.toLowerCase().replaceAll(" ", "")}`}</p>
         </div>
-        <button>Change photo</button>
+        <label className="photo-button">Change photo<input type="file" accept="image/*" onChange={(e) => { const file=e.target.files[0]; if(file) setPhoto(URL.createObjectURL(file)); }}/></label>
       </div>
       <label>
         Display name
@@ -2049,16 +2072,16 @@ function ProfileEditor({ user, onSave }) {
       </label>
       <label>
         Bio
-        <textarea defaultValue="Independent designer exploring systems, type, and new visual languages." />
+        <textarea value={bio} onChange={(e) => setBio(e.target.value)} placeholder="Tell us a little about yourself" />
       </label>
       <div className="form-row">
         <label>
           Location
-          <input defaultValue="Tirana, Albania" />
+          <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="City, Country" />
         </label>
         <label>
-          Portfolio URL
-          <input defaultValue="https://studio.co" />
+          Website or portfolio URL
+          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://" />
         </label>
       </div>
       <button
@@ -2067,6 +2090,10 @@ function ProfileEditor({ user, onSave }) {
           onSave({
             ...user,
             name,
+            bio,
+            location,
+            url,
+            photo,
             initials: name
               .split(" ")
               .map((x) => x[0])
@@ -3109,7 +3136,8 @@ function DesignEditor({ notify }) {
   );
 }
 
-function AdminPanel({ products, onApprove, onReject }) {
+function AdminPanel({ products, users, onApprove, onReject }) {
+  const [section, setSection] = useState("overview");
   const pending = products.filter((x) => x.status === "pending");
   return (
     <main className="admin-shell">
@@ -3118,14 +3146,17 @@ function AdminPanel({ products, onApprove, onReject }) {
           <ShieldCheck size={20} /> METAINSPО ADMIN
         </div>
         <nav>
-          <button className="active">
-            <LayoutDashboard size={17} /> Review queue <em>{pending.length}</em>
+          <button className={section === "overview" ? "active" : ""} onClick={() => setSection("overview")}>
+            <LayoutDashboard size={17} /> Overview
           </button>
-          <button>
-            <Package size={17} /> All products
+          <button className={section === "review" ? "active" : ""} onClick={() => setSection("review")}>
+            <ShieldCheck size={17} /> Review queue <em>{pending.length}</em>
           </button>
-          <button>
-            <User size={17} /> Users
+          <button className={section === "assets" ? "active" : ""} onClick={() => setSection("assets")}>
+            <Package size={17} /> All assets
+          </button>
+          <button className={section === "users" ? "active" : ""} onClick={() => setSection("users")}>
+            <User size={17} /> Users <em>{users.length}</em>
           </button>
           <button>
             <Share2 size={17} /> Reports
@@ -3138,8 +3169,8 @@ function AdminPanel({ products, onApprove, onReject }) {
       <section className="admin-content">
         <header>
           <div>
-            <p className="eyebrow">MODERATION CENTER</p>
-            <h1>Review queue</h1>
+            <p className="eyebrow">ADMIN PANEL</p>
+            <h1>{section === "overview" ? "Platform overview" : section === "review" ? "Review queue" : section === "assets" ? "All assets" : "User directory"}</h1>
             <span>
               Verify quality, licensing, and product information before
               publication.
@@ -3149,7 +3180,7 @@ function AdminPanel({ products, onApprove, onReject }) {
             <i /> Platform healthy
           </div>
         </header>
-        <div className="admin-stats">
+        <div className={`admin-stats ${section === "assets" || section === "users" ? "section-hidden" : ""}`}>
           <div>
             <strong>{pending.length}</strong>
             <span>Awaiting review</span>
@@ -3163,11 +3194,11 @@ function AdminPanel({ products, onApprove, onReject }) {
             <span>Reported items</span>
           </div>
           <div>
-            <strong>1,284</strong>
+            <strong>{users.filter((x) => x.role === "creator").length}</strong>
             <span>Active creators</span>
           </div>
         </div>
-        <div className="review-list">
+        <div className={`review-list ${section !== "review" ? "section-hidden" : ""}`}>
           {pending.length ? (
             pending.map((item) => (
               <article key={item.id}>
@@ -3200,6 +3231,9 @@ function AdminPanel({ products, onApprove, onReject }) {
             />
           )}
         </div>
+        {section === "overview" && <div className="admin-overview-grid"><section><p className="eyebrow">RECENT ACTIVITY</p><h2>Marketplace actions</h2>{users.flatMap((account) => account.activity.map((entry, i) => <div className="activity-row" key={`${account.email}-${i}`}><Avatar initials={account.initials}/><div><strong>{account.name}</strong><span>{entry}</span></div><small>Today</small></div>))}</section><section><p className="eyebrow">ROLE BREAKDOWN</p><h2>Community</h2><div className="role-breakdown"><strong>{users.filter((x) => x.role === "explorer").length}</strong><span>Explorers</span><strong>{users.filter((x) => x.role === "creator").length}</strong><span>Creators</span></div></section></div>}
+        {section === "users" && <div className="admin-user-table"><div className="admin-table-head"><span>User</span><span>Role</span><span>Downloads</span><span>Uploaded assets</span></div>{users.map((account) => <article key={account.email}><div><Avatar initials={account.initials}/><span><strong>{account.name}</strong><small>{account.email}</small></span></div><b className={`role-pill ${account.role}`}>{account.role}</b><span>{account.downloads.length}</span><span>{account.role === "creator" ? products.filter((p) => p.creator === account.name).length : "—"}</span></article>)}</div>}
+        {section === "assets" && <div className="review-list">{products.filter((x) => x.status !== "archived").map((item) => <article key={item.id}><img src={item.image}/><div className="review-main"><span>{item.category} · {item.productType}</span><h3>{item.title}</h3><p>by {item.creator} · {item.sales} downloads/sales</p></div><span className={`status-live ${item.status}`}>{item.status}</span></article>)}</div>}
       </section>
     </main>
   );
@@ -3209,10 +3243,10 @@ export default function App() {
   const [user, setUser] = useState(() => {
     try {
       return (
-        JSON.parse(localStorage.getItem("metainspo-user")) || demoUsers.designer
+        JSON.parse(localStorage.getItem("metainspo-user")) || demoUsers.creator
       );
     } catch {
-      return demoUsers.designer;
+      return demoUsers.creator;
     }
   });
   const [view, setView] = useState("explore");
@@ -3248,6 +3282,12 @@ export default function App() {
       color: "#47774f",
       covers: [4, 8, 11],
     },
+  ];
+  const adminUsers = [
+    { ...demoUsers.explorer, downloads: [1, 4, 8], activity: ["Downloaded Soft brutalism", "Created a new space"] },
+    { ...demoUsers.creator, downloads: [2, 5], activity: ["Submitted Chromatic object study", "Updated creator profile"] },
+    { name: "Noah Williams", email: "noah@example.com", role: "explorer", initials: "NW", downloads: [3], activity: ["Downloaded Future matter"] },
+    { name: "Lina Studio", email: "hello@lina.studio", role: "creator", initials: "LS", downloads: [7, 10], activity: ["Published Afterglow identity"] },
   ];
 
   const visibleItems = useMemo(() => {
@@ -3291,7 +3331,7 @@ export default function App() {
   const confirmSave = (item, spaceId) => {
     setSavedIds((ids) => [...new Set([...ids, item.id])]);
     setSpaces((all) =>
-      all.map((s) => (s.id === spaceId ? { ...s, count: s.count + 1 } : s)),
+      all.map((s) => (s.id === spaceId ? { ...s, count: s.count + 1, covers: s.covers.length ? s.covers : [item.id] } : s)),
     );
     setSaveTarget(null);
     notify(`Saved “${item.title}” to your space`);
@@ -3354,10 +3394,10 @@ export default function App() {
       );
     }
   };
-  const publishProduct = (form) => {
+  const publishProduct = (form, status = "pending") => {
     const seed = catalog[(catalog.length + 2) % catalog.length];
     const price = form.type === "Free" ? 0 : Number(form.price || 0);
-    const ext = form.file.name.split(".").pop().toUpperCase();
+    const ext = form.file ? form.file.name.split(".").pop().toUpperCase() : "ZIP";
     const product = {
       ...seed,
       id: `product-${Date.now()}`,
@@ -3369,15 +3409,15 @@ export default function App() {
       creatorInitials: user.initials,
       sales: 0,
       rating: "New",
-      status: "pending",
-      image: URL.createObjectURL(form.preview),
-      fileName: form.file.name,
-      fileUrl: URL.createObjectURL(form.file),
-      fileSize: `${(form.file.size / 1024 / 1024).toFixed(2)} MB`,
+      status,
+      image: form.preview ? URL.createObjectURL(form.preview) : seed.image,
+      fileName: form.file?.name || "Draft asset.zip",
+      fileUrl: form.file ? URL.createObjectURL(form.file) : "",
+      fileSize: form.file ? `${(form.file.size / 1024 / 1024).toFixed(2)} MB` : "—",
       formats: [ext],
     };
     setCatalog((items) => [product, ...items]);
-    notify(`“${form.title}” was submitted for admin review`);
+    notify(status === "draft" ? "Asset saved as draft" : `“${form.title}” was submitted for admin review`);
   };
   const authenticate = (nextUser) => {
     setUser(nextUser);
@@ -3416,20 +3456,26 @@ export default function App() {
     setQuery(search.trim());
     setView("explore");
   };
-  const createSpace = () => {
+  const createSpace = (name = "Untitled creative space") => {
     const id = `s${Date.now()}`;
     setSpaces((s) => [
       ...s,
       {
         id,
-        name: "Untitled creative space",
+        name,
         count: 0,
         color: "#75d9bc",
-        covers: [3, 6, 9],
+        covers: [],
       },
     ]);
     notify("New space created");
   };
+  const deleteSpace = (id) => {
+    setSpaces((all) => all.filter((space) => space.id !== id));
+    notify("Space deleted");
+  };
+  const updateAssetStatus = (id, status) => setCatalog((items) => items.map((item) => item.id === id ? { ...item, status } : item));
+  const deleteAsset = (id) => { setCatalog((items) => items.filter((item) => item.id !== id)); notify("Asset deleted"); };
 
   useEffect(() => {
     const onKey = (e) => {
@@ -3486,10 +3532,10 @@ export default function App() {
       {view === "spaces" && (
         <SpacesView spaces={spaces} items={catalog} setView={setView} />
       )}
-      {(view === "dashboard" || view === "profile" || view === "settings") && (
+      {(view === "dashboard" || view === "profile" || view === "settings" || view === "downloads" || view === "billing" || view === "account-spaces") && (
         <AccountCenter
           user={user}
-          initialTab={view === "dashboard" ? "overview" : view}
+          initialTab={view === "dashboard" ? "profile" : view === "account-spaces" ? "spaces" : view}
           savedItems={savedItems}
           ownedItems={ownedItems}
           spaces={spaces}
@@ -3499,6 +3545,8 @@ export default function App() {
           onDownload={downloadProduct}
           setView={setView}
           onUpdateUser={updateUser}
+          onCreateSpace={createSpace}
+          onDeleteSpace={deleteSpace}
         />
       )}
       {view === "creator" && (
@@ -3509,14 +3557,17 @@ export default function App() {
               : catalog.slice(0, 5)
           }
           onPublish={publishProduct}
+          onArchive={(id) => { updateAssetStatus(id, "archived"); notify("Asset archived"); }}
+          onDelete={deleteAsset}
         />
       )}
-      {view === "editor" && user.role === "designer" && (
+      {view === "editor" && (user.role === "creator" || user.role === "admin") && (
         <DesignEditor notify={notify} />
       )}
       {view === "admin" && (
         <AdminPanel
           products={catalog}
+          users={adminUsers}
           onApprove={(id) => moderate(id, "approved")}
           onReject={(id) => moderate(id, "rejected")}
         />
