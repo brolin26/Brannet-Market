@@ -14,6 +14,7 @@ import {
   Folder,
   Grid2X2,
   Heart,
+  Hand,
   Home,
   Layers3,
   LayoutDashboard,
@@ -42,6 +43,10 @@ import {
   Lock,
   Mail,
   Pencil,
+  PenTool,
+  Eraser,
+  PaintBucket,
+  Star,
   ImageIcon,
   RotateCcw,
   Undo2,
@@ -2176,11 +2181,46 @@ function DesignEditor({ notify }) {
   const [history, setHistory] = useState(["New document"]);
   const [openMenu, setOpenMenu] = useState(null);
   const [layerClipboard, setLayerClipboard] = useState(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 1200, height: 800 });
+  const [stagePan, setStagePan] = useState({ x: 0, y: 0 });
+  const [drawSettings, setDrawSettings] = useState({ color: "#111111", size: 18, pressure: 70, mode: "freehand" });
+  const [strokes, setStrokes] = useState([]);
+  const [drawing, setDrawing] = useState(null);
+  const [assetSearch, setAssetSearch] = useState("");
+  const [adjustDialog, setAdjustDialog] = useState(null);
+  const undoStack = useRef([]);
+  const redoStack = useRef([]);
+  const dragRef = useRef(null);
   const imgRef = useRef(null);
   const openFileRef = useRef(null);
   const filterString = `brightness(${adjustments.brightness}%) contrast(${adjustments.contrast}%) saturate(${adjustments.saturation}%) blur(${adjustments.blur}px) grayscale(${adjustments.grayscale}%)`;
-  const record = (action) =>
+  const layerFilter = (layer) => {
+    const a = layer.adjustments || adjustments;
+    return `brightness(${a.brightness}%) contrast(${a.contrast}%) saturate(${a.saturation}%) blur(${a.blur}px) grayscale(${a.grayscale}%)`;
+  };
+  const snapshot = () => ({ layers, adjustments, background, imageUrl, canvasSize, strokes });
+  const restore = (state) => {
+    setLayers(state.layers); setAdjustments(state.adjustments); setBackground(state.background);
+    setImageUrl(state.imageUrl); setCanvasSize(state.canvasSize); setStrokes(state.strokes || []);
+  };
+  const record = (action) => {
+    undoStack.current.push(snapshot());
+    if (undoStack.current.length > 40) undoStack.current.shift();
+    redoStack.current = [];
     setHistory((items) => [...items.slice(-15), action]);
+  };
+  const undo = () => {
+    const previous = undoStack.current.pop();
+    if (!previous) return;
+    redoStack.current.push(snapshot()); restore(previous);
+    setHistory((items) => [...items.slice(-15), "Undo"]); setOpenMenu(null);
+  };
+  const redo = () => {
+    const next = redoStack.current.pop();
+    if (!next) return;
+    undoStack.current.push(snapshot()); restore(next);
+    setHistory((items) => [...items.slice(-15), "Redo"]); setOpenMenu(null);
+  };
   const upload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -2195,6 +2235,8 @@ function DesignEditor({ notify }) {
         type: "image",
         visible: true,
         locked: false,
+        x: 0,
+        y: 0,
       },
       ...current.filter((x) => x.id !== "image"),
     ]);
@@ -2213,6 +2255,13 @@ function DesignEditor({ notify }) {
         text: "Your headline",
         color: "#111111",
         size: 54,
+        x: 0,
+        y: 0,
+        fillType: "solid",
+        gradientColor: "#6c51f4",
+        strokeColor: "#000000",
+        strokeGradient: "#ff694f",
+        strokeWidth: 0,
       },
       ...current,
     ]);
@@ -2225,6 +2274,46 @@ function DesignEditor({ notify }) {
         layer.id === id ? { ...layer, ...values } : layer,
       ),
     );
+  const toggleLock = (id) => {
+    const layer = layers.find((x) => x.id === id);
+    if (!layer || layer.type === "background") return;
+    record(layer.locked ? `Unlocked ${layer.name}` : `Locked ${layer.name}`);
+    updateLayer(id, { locked: !layer.locked });
+  };
+  const beginCanvasAction = (e, layer = null) => {
+    const rect = e.currentTarget.closest(".pro-artboard")?.getBoundingClientRect() || e.currentTarget.getBoundingClientRect();
+    if (activeTool === "Hand") {
+      dragRef.current = { type: "hand", startX: e.clientX, startY: e.clientY, pan: stagePan };
+      return;
+    }
+    if (activeTool === "Move" && layer && !layer.locked) {
+      e.stopPropagation(); setSelectedLayer(layer.id); record(`Moved ${layer.name}`);
+      dragRef.current = { type: "move", id: layer.id, startX: e.clientX, startY: e.clientY, x: layer.x || 0, y: layer.y || 0 };
+      return;
+    }
+    if (["Pen", "Brush", "Eraser"].includes(activeTool)) {
+      const point = { x: (e.clientX - rect.left) / (zoom / 100), y: (e.clientY - rect.top) / (zoom / 100) };
+      if (activeTool === "Eraser") {
+        record("Erased brush stroke"); setStrokes((all) => all.slice(0, -1)); return;
+      }
+      record(activeTool === "Pen" ? "Drew pen path" : "Painted brush stroke");
+      setDrawing({ id: `stroke-${Date.now()}`, tool: activeTool, color: drawSettings.color, width: drawSettings.size * (drawSettings.pressure / 100), points: [point] });
+    }
+  };
+  const moveCanvasAction = (e) => {
+    if (dragRef.current?.type === "hand") {
+      setStagePan({ x: dragRef.current.pan.x + e.clientX - dragRef.current.startX, y: dragRef.current.pan.y + e.clientY - dragRef.current.startY });
+    } else if (dragRef.current?.type === "move") {
+      updateLayer(dragRef.current.id, { x: dragRef.current.x + (e.clientX - dragRef.current.startX) / (zoom / 100), y: dragRef.current.y + (e.clientY - dragRef.current.startY) / (zoom / 100) });
+    } else if (drawing) {
+      const rect = e.currentTarget.querySelector(".pro-artboard")?.getBoundingClientRect();
+      if (rect) setDrawing((path) => ({ ...path, points: [...path.points, { x: (e.clientX - rect.left) / (zoom / 100), y: (e.clientY - rect.top) / (zoom / 100) }] }));
+    }
+  };
+  const endCanvasAction = () => {
+    dragRef.current = null;
+    if (drawing) { setStrokes((all) => [...all, drawing]); setDrawing(null); }
+  };
   const removeLayer = () => {
     const layer = layers.find((x) => x.id === selectedLayer);
     if (!layer || layer.locked) return;
@@ -2274,13 +2363,15 @@ function DesignEditor({ notify }) {
     setOpenMenu(null);
   };
   const reset = () => {
-    setAdjustments({
+    const defaults = {
       brightness: 100,
       contrast: 100,
       saturation: 100,
       blur: 0,
       grayscale: 0,
-    });
+    };
+    const target = layers.find((x) => x.id === selectedLayer);
+    if (target?.type === "image") updateLayer(target.id, { adjustments: defaults }); else setAdjustments(defaults);
     record("Reset adjustments");
   };
   const autoTone = () => {
@@ -2389,7 +2480,6 @@ function DesignEditor({ notify }) {
     ["Elements", Shapes],
     ["Draw", Brush],
     ["Background", Palette],
-    ["Layers", Layers3],
     ["Resize", Crop],
   ];
   const controls = [
@@ -2400,6 +2490,15 @@ function DesignEditor({ notify }) {
     ["grayscale", "Grayscale", 0, 100],
   ];
   const selected = layers.find((x) => x.id === selectedLayer);
+  const selectedAdjustments = selected?.adjustments || adjustments;
+  const photoLibrary = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, name: `Creative photo ${i + 1}`, url: `https://images.unsplash.com/photo-${[1618005182384,1634017839464,1635070041078,1511818966892,1558655146,1604871000636,1547891654,1616486338812,1561214115,1557682250][i % 10]}-${["a83a8bd57fbe","5c339ebe3cb4","e363dbe005cb","d7d671e672a2","9f40138edfeb","074fa5117945","e66ed7ebb968","3dadae4b4ace","f2f134cc4912","33bd709cbe85"][i % 10]}?auto=format&fit=crop&w=500&q=75` }));
+  const templateLibrary = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, name: `Creative layout ${i + 1}`, bg: ["#f5df4d","#6c51f4","#ff694f","#84d6c3","#111111"][i % 5], accent: ["#111111","#ffffff","#f5df4d"][i % 3] }));
+  const textLibrary = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, text: ["MAKE IT BOLD","New perspectives","Less, but better","Creative direction","Ideas in motion"][i % 5], size: [34,44,54,64,76][i % 5] }));
+  const shapeLibrary = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, shape: ["square","circle","star","triangle","diamond"][i % 5] }));
+  const placePhoto = (photo) => { record("Placed stock photo"); setImageUrl(photo.url); setFileName(photo.name); setLayers((all) => [{ id: `image-${Date.now()}`, name: photo.name, type: "image", visible: true, locked: false, x: 0, y: 0, src: photo.url }, ...all]); };
+  const applyTemplate = (template) => { record(`Applied ${template.name}`); setBackground(template.bg); const now=Date.now(); setLayers([{ id:`text-${now}`, name:"Template headline", type:"text", visible:true, locked:false, text:template.name, color:template.accent, size:64, x:0, y:-80, fillType:"solid", gradientColor:"#ffffff", strokeColor:"#000000", strokeGradient:"#ff694f", strokeWidth:0 }, { id:`shape-${now}`, name:"Accent shape", type:"shape", shape:"circle", visible:true, locked:false, color:template.accent, x:180, y:100, size:120 }, { id:"background", name:"Background", type:"background", visible:true, locked:true }]); };
+  const addTextPreset = (preset) => { addText(); setTimeout(() => setLayers((all) => all.map((layer, i) => i === 0 ? {...layer, text:preset.text, name:preset.text, size:preset.size} : layer)), 0); };
+  const addShape = (shape) => { const id=`shape-${Date.now()}`; record(`Added ${shape.shape}`); setLayers((all) => [{id,name:shape.shape,type:"shape",shape:shape.shape,visible:true,locked:false,color:drawSettings.color,size:140,x:0,y:0},...all]); setSelectedLayer(id); };
   const panelContent = () => {
     if (activeTool === "Upload")
       return (
@@ -2431,6 +2530,7 @@ function DesignEditor({ notify }) {
           </button>
           <button className="text-preset">Add a subheading</button>
           <button className="text-preset small">Add body text</button>
+          <div className="asset-library text-library">{textLibrary.map((preset) => <button key={preset.id} onClick={() => addTextPreset(preset)} style={{fontSize: Math.min(18,preset.size/3)}}>{preset.text}</button>)}</div>
         </div>
       );
     if (activeTool === "Background")
@@ -2467,26 +2567,23 @@ function DesignEditor({ notify }) {
           </div>
         </div>
       );
-    if (activeTool === "Layers")
-      return (
-        <div className="pro-panel-content">
-          <h3>Layers</h3>
-          <p>Manage objects from the right panel.</p>
-        </div>
-      );
+    if (activeTool === "Templates") return <div className="pro-panel-content"><h3>Templates</h3><div className="pro-search"><Search size={15}/><input value={assetSearch} onChange={(e)=>setAssetSearch(e.target.value)} placeholder="Search 100 templates..."/></div><div className="asset-library template-library">{templateLibrary.filter(x=>x.name.toLowerCase().includes(assetSearch.toLowerCase())).map((item)=><button key={item.id} onClick={()=>applyTemplate(item)} style={{background:item.bg,color:item.accent}}><b>Aa</b><span>{item.name}</span></button>)}</div></div>;
+    if (activeTool === "Elements") return <div className="pro-panel-content"><h3>Elements</h3><p>100 reusable vector shapes.</p><div className="asset-library shape-library">{shapeLibrary.map((item)=><button key={item.id} onClick={()=>addShape(item)} title={`${item.shape} ${item.id}`}><Shapes size={20}/><span>{item.shape}</span></button>)}</div></div>;
+    if (activeTool === "Draw") return <div className="pro-panel-content"><h3>Draw</h3><label>Brush color<input type="color" value={drawSettings.color} onChange={(e)=>setDrawSettings({...drawSettings,color:e.target.value})}/></label><label>Size <input type="range" min="1" max="100" value={drawSettings.size} onChange={(e)=>setDrawSettings({...drawSettings,size:Number(e.target.value)})}/></label><label>Pressure <input type="range" min="10" max="100" value={drawSettings.pressure} onChange={(e)=>setDrawSettings({...drawSettings,pressure:Number(e.target.value)})}/></label><div className="brush-options"><button onClick={()=>setActiveTool("Brush")}>Soft brush</button><button onClick={()=>{setDrawSettings({...drawSettings,pressure:100});setActiveTool("Brush")}}>Hard brush</button><button onClick={()=>setActiveTool("Pen")}>Bezier pen</button></div></div>;
+    if (activeTool === "Media") return <div className="pro-panel-content"><h3>Your media</h3><p>Files uploaded by this Creator.</p><label className="pro-upload"><input type="file" accept="image/*" onChange={upload}/><Upload size={20}/><strong>Add media</strong></label>{imageUrl&&<div className="asset-library photo-library"><button onClick={()=>placePhoto({url:imageUrl,name:fileName})}><img src={imageUrl}/><span>{fileName}</span></button></div>}</div>;
     if (activeTool === "Resize")
       return (
         <div className="pro-panel-content">
           <h3>Resize</h3>
           <label>
             Width
-            <input defaultValue="1200" />
+            <input type="number" value={canvasSize.width} onChange={(e)=>setCanvasSize({...canvasSize,width:Number(e.target.value)})} />
           </label>
           <label>
             Height
-            <input defaultValue="800" />
+            <input type="number" value={canvasSize.height} onChange={(e)=>setCanvasSize({...canvasSize,height:Number(e.target.value)})} />
           </label>
-          <button className="add-heading">Resize design</button>
+          <button className="add-heading" onClick={()=>record("Resized canvas")}>Resize canvas</button>
         </div>
       );
     if (["AI Image", "Photos"].includes(activeTool))
@@ -2495,7 +2592,7 @@ function DesignEditor({ notify }) {
           <h3>{activeTool}</h3>
           <div className="pro-search">
             <Search size={15} />
-            <input placeholder={`Search ${activeTool.toLowerCase()}...`} />
+            <input value={assetSearch} onChange={(e)=>setAssetSearch(e.target.value)} placeholder={`Search ${activeTool.toLowerCase()}...`} />
           </div>
           {activeTool === "AI Image" && (
             <>
@@ -2508,6 +2605,7 @@ function DesignEditor({ notify }) {
               </p>
             </>
           )}
+          {activeTool === "Photos" && <div className="asset-library photo-library">{photoLibrary.filter(x=>x.name.includes(assetSearch)).map((photo)=><button key={photo.id} onClick={()=>placePhoto(photo)}><img src={photo.url}/><span>{photo.name}</span></button>)}</div>}
         </div>
       );
     return (
@@ -2524,6 +2622,15 @@ function DesignEditor({ notify }) {
       </div>
     );
   };
+  useEffect(() => {
+    const shortcuts = (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+      if (e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
+    };
+    window.addEventListener("keydown", shortcuts);
+    return () => window.removeEventListener("keydown", shortcuts);
+  });
   return (
     <main className="pro-editor">
       <input
@@ -2623,28 +2730,22 @@ function DesignEditor({ notify }) {
           {openMenu === "Edit" && (
             <div className="file-dropdown edit-dropdown">
               <button
-                onClick={() => {
-                  record("Undo");
-                  setOpenMenu(null);
-                }}
+                onClick={undo}
               >
                 <span>Undo</span>
                 <kbd>Ctrl + Z</kbd>
               </button>
               <button
-                onClick={() => {
-                  record("Redo");
-                  setOpenMenu(null);
-                }}
+                onClick={redo}
               >
                 <span>Redo</span>
                 <kbd>Ctrl + Y</kbd>
               </button>
-              <button onClick={() => record("Step forward")}>
+              <button onClick={redo}>
                 <span>Step Forward</span>
                 <kbd>Shift + Ctrl + Z</kbd>
               </button>
-              <button onClick={() => record("Step backward")}>
+              <button onClick={undo}>
                 <span>Step Backward</span>
                 <kbd>Ctrl + Z</kbd>
               </button>
@@ -2759,10 +2860,8 @@ function DesignEditor({ notify }) {
                 <span>Mode</span>
                 <ChevronRight size={13} />
               </button>
-              <button onClick={() => setActiveTool("Layers")}>
-                <span>Adjustments</span>
-                <ChevronRight size={13} />
-              </button>
+              <button className="disabled"><span>Adjustments</span></button>
+              {controls.map(([key,label]) => <button key={key} onClick={()=>{record(`Opened ${label}`);setAdjustDialog(key);setOpenMenu(null)}}><span>{label}…</span></button>)}
               <i />
               <button onClick={autoTone}>
                 <span>Auto Tone</span>
@@ -2879,10 +2978,10 @@ function DesignEditor({ notify }) {
         <Avatar initials="AM" />
       </div>
       <div className="pro-contextbar">
-        <button onClick={() => record("Undo")}>
+        <button onClick={undo} disabled={!undoStack.current.length}>
           <Undo2 size={16} />
         </button>
-        <button>
+        <button onClick={redo} disabled={!redoStack.current.length}>
           <Redo2 size={16} />
         </button>
         <i />
@@ -2960,10 +3059,10 @@ function DesignEditor({ notify }) {
             <span>{fileName}.mti</span>
             <X size={13} />
           </div>
-          <div className="pro-artboard-wrap">
+          <div className={`pro-artboard-wrap tool-${activeTool.toLowerCase()}`} onPointerMove={moveCanvasAction} onPointerUp={endCanvasAction} onPointerLeave={endCanvasAction} onPointerDown={(e)=>beginCanvasAction(e)} style={{transform:`translate(${stagePan.x}px,${stagePan.y}px)`}}>
             <div
               className="pro-artboard"
-              style={{ background, transform: `scale(${zoom / 100})` }}
+              style={{ background, width:canvasSize.width, height:canvasSize.height, transform: `scale(${zoom / 100})` }}
             >
               {layers
                 .slice()
@@ -2973,16 +3072,18 @@ function DesignEditor({ notify }) {
                     <img
                       ref={imgRef}
                       key={layer.id}
-                      src={imageUrl}
-                      style={{ filter: filterString }}
+                      src={layer.src || imageUrl}
+                      style={{ filter: layerFilter(layer), transform:`translate(${layer.x||0}px,${layer.y||0}px)` }}
                       onClick={() => setSelectedLayer(layer.id)}
+                      onPointerDown={(e)=>beginCanvasAction(e,layer)}
                     />
                   ) : layer.visible && layer.type === "text" ? (
                     <div
                       key={layer.id}
                       className={`canvas-text ${selectedLayer === layer.id ? "selected" : ""}`}
-                      style={{ color: layer.color, fontSize: layer.size }}
+                      style={{ color: layer.fillType === "gradient" ? "transparent" : layer.color, backgroundImage: layer.fillType === "gradient" ? `linear-gradient(90deg,${layer.color},${layer.gradientColor})` : "none", backgroundClip: layer.fillType === "gradient" ? "text" : "border-box", WebkitBackgroundClip: layer.fillType === "gradient" ? "text" : "border-box", WebkitTextStroke:`${layer.strokeWidth||0}px ${layer.strokeColor||"transparent"}`, fontSize: layer.size, transform:`translate(${layer.x||0}px,${layer.y||0}px)` }}
                       onClick={() => setSelectedLayer(layer.id)}
+                      onPointerDown={(e)=>beginCanvasAction(e,layer)}
                       contentEditable
                       suppressContentEditableWarning
                       onBlur={(e) =>
@@ -2993,10 +3094,12 @@ function DesignEditor({ notify }) {
                     >
                       {layer.text}
                     </div>
-                  ) : null,
+                  ) : layer.visible && layer.type === "shape" ? <div key={layer.id} className={`canvas-shape ${layer.shape}`} style={{'--shape-color':layer.color,width:layer.size,height:layer.size,transform:`translate(${layer.x||0}px,${layer.y||0}px)`}} onPointerDown={(e)=>beginCanvasAction(e,layer)} onClick={()=>setSelectedLayer(layer.id)}>{layer.shape === "star" && <Star size={layer.size} fill={layer.color}/>}</div> : null,
                 )}
+              <svg className="drawing-layer" viewBox={`0 0 ${canvasSize.width} ${canvasSize.height}`}><g>{[...strokes,...(drawing?[drawing]:[])].map(path=><polyline key={path.id} points={path.points.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke={path.color} strokeWidth={path.width} strokeLinecap="round" strokeLinejoin="round"/>)}</g></svg>
             </div>
           </div>
+          <div className="quick-tool-dock">{[["Move",Move],["Hand",Hand],["Pen",PenTool],["Eraser",Eraser],["Brush",Brush],["Fill",PaintBucket]].map(([name,Icon])=><button key={name} className={activeTool===name?"active":""} onClick={()=>{setActiveTool(name);if(name==="Fill"){record("Filled selected layer");selected?.type==="background"?setBackground(drawSettings.color):selected&&updateLayer(selected.id,{color:drawSettings.color})}}} title={`${name} Tool`}><Icon size={18}/><span>{name}</span></button>)}</div>
           <div className="zoom-control">
             <button onClick={() => setZoom((z) => Math.max(10, z - 10))}>
               <Minus size={14} />
@@ -3040,7 +3143,7 @@ function DesignEditor({ notify }) {
                     />
                   </label>
                   <label>
-                    Color
+                    Fill color
                     <input
                       type="color"
                       value={selected.color}
@@ -3049,6 +3152,11 @@ function DesignEditor({ notify }) {
                       }
                     />
                   </label>
+                  <label>Fill mode<select value={selected.fillType || "solid"} onChange={(e)=>updateLayer(selected.id,{fillType:e.target.value})}><option value="solid">Solid</option><option value="gradient">Gradient</option></select></label>
+                  {selected.fillType === "gradient" && <label>Gradient color<input type="color" value={selected.gradientColor || "#6c51f4"} onChange={(e)=>updateLayer(selected.id,{gradientColor:e.target.value})}/></label>}
+                  <label>Stroke color<input type="color" value={selected.strokeColor || "#000000"} onChange={(e)=>updateLayer(selected.id,{strokeColor:e.target.value})}/></label>
+                  <label>Stroke gradient<input type="color" value={selected.strokeGradient || "#ff694f"} onChange={(e)=>updateLayer(selected.id,{strokeGradient:e.target.value})}/></label>
+                  <label>Stroke width<input type="number" min="0" max="30" value={selected.strokeWidth || 0} onChange={(e)=>updateLayer(selected.id,{strokeWidth:Number(e.target.value)})}/></label>
                 </>
               )}
               {selected.type === "image" && (
@@ -3057,19 +3165,15 @@ function DesignEditor({ notify }) {
                     <label key={key}>
                       <span>
                         {label}
-                        <b>{adjustments[key]}</b>
+                        <b>{selectedAdjustments[key]}</b>
                       </span>
                       <input
                         type="range"
+                        onPointerDown={() => record(`Adjusted ${label}`)}
                         min={min}
                         max={max}
-                        value={adjustments[key]}
-                        onChange={(e) =>
-                          setAdjustments({
-                            ...adjustments,
-                            [key]: Number(e.target.value),
-                          })
-                        }
+                        value={selectedAdjustments[key]}
+                        onChange={(e) => updateLayer(selected.id, { adjustments: { ...selectedAdjustments, [key]: Number(e.target.value) } })}
                       />
                     </label>
                   ))}
@@ -3116,7 +3220,7 @@ function DesignEditor({ notify }) {
                   )}
                 </i>
                 <strong>{layer.name}</strong>
-                {layer.locked && <Lock size={12} />}
+                <span className={`layer-lock ${layer.locked ? "locked" : ""}`} onClick={(e)=>{e.stopPropagation();toggleLock(layer.id)}} title={layer.locked ? "Unlock layer" : "Lock layer"}><Lock size={12}/></span>
               </button>
             ))}
           </div>
@@ -3125,13 +3229,14 @@ function DesignEditor({ notify }) {
             {history
               .slice()
               .reverse()
-              .slice(0, 6)
+              .slice(0, 3)
               .map((item, i) => (
                 <span key={`${item}-${i}`}>{item}</span>
               ))}
           </div>
         </aside>
       </div>
+      {adjustDialog && <div className="editor-dialog-backdrop"><div className="adjustment-dialog"><header><strong>{controls.find(([key])=>key===adjustDialog)?.[1]}</strong><button onClick={()=>setAdjustDialog(null)}><X size={16}/></button></header><p>Adjust the selected image layer.</p><input type="range" min={controls.find(([key])=>key===adjustDialog)?.[2]} max={controls.find(([key])=>key===adjustDialog)?.[3]} value={selectedAdjustments[adjustDialog]} onChange={(e)=>selected?.type==="image"&&updateLayer(selected.id,{adjustments:{...selectedAdjustments,[adjustDialog]:Number(e.target.value)}})}/><output>{selectedAdjustments[adjustDialog]}</output><footer><button onClick={()=>setAdjustDialog(null)}>Cancel</button><button className="primary" onClick={()=>{record(`Adjusted ${adjustDialog}`);setAdjustDialog(null)}}>Apply</button></footer></div></div>}
     </main>
   );
 }
