@@ -2188,26 +2188,35 @@ function DesignEditor({ notify }) {
   const [drawing, setDrawing] = useState(null);
   const [assetSearch, setAssetSearch] = useState("");
   const [adjustDialog, setAdjustDialog] = useState(null);
+  const [documents, setDocuments] = useState([{ id: `doc-${Date.now()}`, name: "Untitled design", dirty: false, state: null }]);
+  const [activeDocumentId, setActiveDocumentId] = useState(() => null);
+  const [closeTarget, setCloseTarget] = useState(null);
+  const [showProjectInfo, setShowProjectInfo] = useState(false);
+  const [showSaveAs, setShowSaveAs] = useState(false);
+  const [showRulers, setShowRulers] = useState(false);
   const undoStack = useRef([]);
   const redoStack = useRef([]);
   const dragRef = useRef(null);
   const imgRef = useRef(null);
   const openFileRef = useRef(null);
+  const openProjectRef = useRef(null);
   const filterString = `brightness(${adjustments.brightness}%) contrast(${adjustments.contrast}%) saturate(${adjustments.saturation}%) blur(${adjustments.blur}px) grayscale(${adjustments.grayscale}%)`;
   const layerFilter = (layer) => {
     const a = layer.adjustments || adjustments;
     return `brightness(${a.brightness}%) contrast(${a.contrast}%) saturate(${a.saturation}%) blur(${a.blur}px) grayscale(${a.grayscale}%)`;
   };
-  const snapshot = () => ({ layers, adjustments, background, imageUrl, canvasSize, strokes });
+  const snapshot = () => ({ layers, adjustments, background, imageUrl, canvasSize, strokes, fileName, history, stagePan });
   const restore = (state) => {
     setLayers(state.layers); setAdjustments(state.adjustments); setBackground(state.background);
-    setImageUrl(state.imageUrl); setCanvasSize(state.canvasSize); setStrokes(state.strokes || []);
+    setImageUrl(state.imageUrl || ""); setCanvasSize(state.canvasSize); setStrokes(state.strokes || []);
+    setFileName(state.fileName || "Untitled design"); setHistory(state.history || ["Opened project"]); setStagePan(state.stagePan || {x:0,y:0});
   };
   const record = (action) => {
     undoStack.current.push(snapshot());
     if (undoStack.current.length > 40) undoStack.current.shift();
     redoStack.current = [];
     setHistory((items) => [...items.slice(-15), action]);
+    setDocuments((all) => all.map((doc) => doc.id === (activeDocumentId || all[0]?.id) ? { ...doc, dirty: true } : doc));
   };
   const undo = () => {
     const previous = undoStack.current.pop();
@@ -2224,24 +2233,16 @@ function DesignEditor({ notify }) {
   const upload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (imageUrl?.startsWith("blob:")) URL.revokeObjectURL(imageUrl);
-    const url = URL.createObjectURL(file);
-    setImageUrl(url);
-    setFileName(file.name.replace(/\.[^.]+$/, ""));
-    setLayers((current) => [
-      {
-        id: "image",
-        name: file.name,
-        type: "image",
-        visible: true,
-        locked: false,
-        x: 0,
-        y: 0,
-      },
-      ...current.filter((x) => x.id !== "image"),
-    ]);
-    setSelectedLayer("image");
-    record("Placed image");
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = String(reader.result);
+      const id=`image-${Date.now()}`;
+      setImageUrl(url);
+      setLayers((current) => [{ id, name:file.name, type:"image", visible:true, locked:false, x:0, y:0, src:url }, ...current]);
+      setSelectedLayer(id); record("Imported image");
+    };
+    reader.readAsDataURL(file);
+    e.target.value="";
   };
   const addText = () => {
     const id = `text-${Date.now()}`;
@@ -2281,6 +2282,7 @@ function DesignEditor({ notify }) {
     updateLayer(id, { locked: !layer.locked });
   };
   const beginCanvasAction = (e, layer = null) => {
+    if (layer && activeTool !== "Move") return;
     const rect = e.currentTarget.closest(".pro-artboard")?.getBoundingClientRect() || e.currentTarget.getBoundingClientRect();
     if (activeTool === "Hand") {
       dragRef.current = { type: "hand", startX: e.clientX, startY: e.clientY, pan: stagePan };
@@ -2294,7 +2296,8 @@ function DesignEditor({ notify }) {
     if (["Pen", "Brush", "Eraser"].includes(activeTool)) {
       const point = { x: (e.clientX - rect.left) / (zoom / 100), y: (e.clientY - rect.top) / (zoom / 100) };
       if (activeTool === "Eraser") {
-        record("Erased brush stroke"); setStrokes((all) => all.slice(0, -1)); return;
+        record("Erased brush stroke");
+        setStrokes((all) => all.filter((path) => !path.points.some((p) => Math.hypot(p.x-point.x,p.y-point.y) < Math.max(12,drawSettings.size)))); return;
       }
       record(activeTool === "Pen" ? "Drew pen path" : "Painted brush stroke");
       setDrawing({ id: `stroke-${Date.now()}`, tool: activeTool, color: drawSettings.color, width: drawSettings.size * (drawSettings.pressure / 100), points: [point] });
@@ -2389,7 +2392,45 @@ function DesignEditor({ notify }) {
     record("Auto Color");
     setOpenMenu(null);
   };
+  const blankProject = (name = "Untitled design") => ({
+    layers: [{ id: "background", name: "Background", type: "background", visible: true, locked: true }],
+    adjustments: { brightness:100, contrast:100, saturation:100, blur:0, grayscale:0 },
+    background:"#ffffff", imageUrl:"", canvasSize:{width:1200,height:800}, strokes:[], fileName:name, history:["New document"], stagePan:{x:0,y:0}
+  });
+  const persistActiveDocument = () => {
+    const id = activeDocumentId || documents[0]?.id;
+    const state = snapshot();
+    setDocuments((all) => all.map((doc) => doc.id === id ? { ...doc, name:fileName, state } : doc));
+    return state;
+  };
   const newDocument = () => {
+    persistActiveDocument();
+    const id = `doc-${Date.now()}`;
+    const state = blankProject();
+    setDocuments((all) => [...all, {id,name:"Untitled design",dirty:false,state}]);
+    setActiveDocumentId(id);
+    restore(state);
+    undoStack.current=[]; redoStack.current=[];
+    setOpenMenu(null);
+  };
+  const switchDocument = (id) => {
+    if (id === (activeDocumentId || documents[0]?.id)) return;
+    const currentState = snapshot();
+    const target = documents.find((doc)=>doc.id===id);
+    setDocuments((all)=>all.map((doc)=>doc.id === (activeDocumentId || all[0]?.id) ? {...doc,name:fileName,state:currentState}:doc));
+    setActiveDocumentId(id);
+    restore(target?.state || blankProject(target?.name));
+    undoStack.current=[]; redoStack.current=[];
+  };
+  const requestCloseDocument = (doc) => doc.dirty ? setCloseTarget(doc) : closeDocument(doc.id);
+  const closeDocument = (id) => {
+    const index=documents.findIndex((doc)=>doc.id===id);
+    const remaining=documents.filter((doc)=>doc.id!==id);
+    if (!remaining.length) { const state=blankProject(); const fresh={id:`doc-${Date.now()}`,name:"Untitled design",dirty:false,state}; setDocuments([fresh]);setActiveDocumentId(fresh.id);restore(state); }
+    else { const next=remaining[Math.min(index,remaining.length-1)]; setDocuments(remaining); if(id === (activeDocumentId || documents[0]?.id)){setActiveDocumentId(next.id);restore(next.state || blankProject(next.name));} }
+    setCloseTarget(null);
+  };
+  const resetCurrentDocument = () => {
     setImageUrl("");
     setFileName("Untitled design");
     setBackground("#ffffff");
@@ -2414,10 +2455,11 @@ function DesignEditor({ notify }) {
     setOpenMenu(null);
   };
   const saveProject = () => {
+    const projectState={...snapshot(),fileName};
     const data = new Blob(
       [
         JSON.stringify(
-          { name: fileName, background, adjustments, layers },
+          { format:"metainspo-project", version:1, name:fileName, savedAt:new Date().toISOString(), state:projectState },
           null,
           2,
         ),
@@ -2430,25 +2472,32 @@ function DesignEditor({ notify }) {
     link.download = `${fileName}.metainspo`;
     link.click();
     URL.revokeObjectURL(url);
-    record("Saved project");
+    setHistory((items)=>[...items.slice(-15),"Saved project"]);
+    setDocuments((all)=>all.map((doc)=>doc.id === (activeDocumentId || all[0]?.id) ? {...doc,name:fileName,dirty:false,state:projectState}:doc));
     setOpenMenu(null);
     notify("Editable Metainspo project saved");
   };
-  const exportImage = () => {
+  const openProject = (e) => {
+    const file=e.target.files[0]; if(!file)return;
+    const reader=new FileReader();
+    reader.onload=()=>{try{const data=JSON.parse(String(reader.result));if(data.format!=="metainspo-project"||!data.state?.layers)throw new Error("Invalid project");persistActiveDocument();const id=`doc-${Date.now()}`;const state={...data.state,fileName:data.name||file.name.replace(/\.metainspo$|\.json$/i,"")};setDocuments((all)=>[...all,{id,name:state.fileName,dirty:false,state}]);setActiveDocumentId(id);restore(state);setOpenMenu(null);notify("Project opened successfully");}catch{notify("This file is not a valid Metainspo project");}};
+    reader.readAsText(file);e.target.value="";
+  };
+  const exportImage = (mime="image/png", extension="png") => {
     const canvas = document.createElement("canvas");
-    canvas.width = 1200;
-    canvas.height = 800;
+    canvas.width = canvasSize.width;
+    canvas.height = canvasSize.height;
     const ctx = canvas.getContext("2d");
     ctx.fillStyle = background;
-    ctx.fillRect(0, 0, 1200, 800);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     const imageLayer = layers.find((x) => x.type === "image" && x.visible);
     if (imageLayer && imgRef.current) {
       ctx.filter = filterString;
       const img = imgRef.current;
-      const scale = Math.min(1200 / img.naturalWidth, 800 / img.naturalHeight);
+      const scale = Math.min(canvas.width / img.naturalWidth, canvas.height / img.naturalHeight);
       const w = img.naturalWidth * scale,
         h = img.naturalHeight * scale;
-      ctx.drawImage(img, (1200 - w) / 2, (800 - h) / 2, w, h);
+      ctx.drawImage(img, (canvas.width - w) / 2 + (imageLayer.x||0), (canvas.height - h) / 2 + (imageLayer.y||0), w, h);
       ctx.filter = "none";
     }
     layers
@@ -2458,17 +2507,19 @@ function DesignEditor({ notify }) {
         ctx.fillStyle = layer.color;
         ctx.font = `700 ${layer.size}px Manrope, sans-serif`;
         ctx.textAlign = "center";
-        ctx.fillText(layer.text, 600, 150 + i * 80);
+        ctx.fillText(layer.text, canvas.width/2+(layer.x||0), 150 + i * 80+(layer.y||0));
       });
+    strokes.forEach((path)=>{if(path.points.length<2)return;ctx.beginPath();ctx.moveTo(path.points[0].x,path.points[0].y);path.points.slice(1).forEach((p)=>ctx.lineTo(p.x,p.y));ctx.strokeStyle=path.color;ctx.lineWidth=path.width;ctx.lineCap="round";ctx.lineJoin="round";ctx.stroke();});
     canvas.toBlob((blob) => {
+      if(!blob){notify(`${extension.toUpperCase()} is not supported by this browser`);return;}
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `${fileName}-edited.png`;
+      link.download = `${fileName}.${extension}`;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      notify("Professional PNG exported");
-    }, "image/png");
+      notify(`${extension.toUpperCase()} image saved`);
+    }, mime, .92);
   };
   const tools = [
     ["Photos", ImageIcon],
@@ -2627,6 +2678,10 @@ function DesignEditor({ notify }) {
       if (!(e.ctrlKey || e.metaKey)) return;
       if (e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       if (e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
+      if (e.key.toLowerCase() === "n") { e.preventDefault(); newDocument(); }
+      if (e.key.toLowerCase() === "o") { e.preventDefault(); openProjectRef.current?.click(); }
+      if (e.key.toLowerCase() === "s") { e.preventDefault(); e.shiftKey ? setShowSaveAs(true) : saveProject(); }
+      if (e.key.toLowerCase() === "r") { e.preventDefault(); setShowRulers((value)=>!value); }
     };
     window.addEventListener("keydown", shortcuts);
     return () => window.removeEventListener("keydown", shortcuts);
@@ -2640,6 +2695,7 @@ function DesignEditor({ notify }) {
         accept="image/*"
         onChange={upload}
       />
+      <input ref={openProjectRef} className="hidden-editor-file" type="file" accept=".metainspo,.json,application/json" onChange={openProject} />
       <div className="pro-menubar">
         <div className="editor-wordmark">
           <Logo compact />
@@ -2659,11 +2715,11 @@ function DesignEditor({ notify }) {
               </button>
               <button
                 onClick={() => {
-                  openFileRef.current?.click();
+                  openProjectRef.current?.click();
                   setOpenMenu(null);
                 }}
               >
-                <span>Open…</span>
+                <span>Open project…</span>
                 <kbd>Ctrl + O</kbd>
               </button>
               <button
@@ -2672,7 +2728,7 @@ function DesignEditor({ notify }) {
                   setOpenMenu(null);
                 }}
               >
-                <span>Open & Place…</span>
+                <span>Import…</span>
                 <kbd>⇧ Ctrl + O</kbd>
               </button>
               <button>
@@ -2689,17 +2745,14 @@ function DesignEditor({ notify }) {
                 <span>Save project</span>
                 <kbd>Ctrl + S</kbd>
               </button>
-              <button onClick={saveProject}>
+              <button onClick={() => {setShowSaveAs(true);setOpenMenu(null)}}>
                 <span>Save project as…</span>
                 <kbd>⇧ Ctrl + S</kbd>
               </button>
               <i />
-              <button onClick={exportImage}>
+              <button onClick={() => exportImage("image/png","png")}>
                 <span>Export as PNG</span>
                 <ChevronRight size={13} />
-              </button>
-              <button onClick={exportImage}>
-                <span>Export layers…</span>
               </button>
               <button onClick={() => window.print()}>
                 <span>Print…</span>
@@ -2707,15 +2760,9 @@ function DesignEditor({ notify }) {
               </button>
               <i />
               <button
-                onClick={() =>
-                  notify(`${fileName}: 1200 × 800 px, ${layers.length} layers`)
-                }
+                onClick={() => {setShowProjectInfo(true);setOpenMenu(null)}}
               >
                 <span>File info…</span>
-              </button>
-              <button>
-                <span>Automate</span>
-                <ChevronRight size={13} />
               </button>
             </div>
           )}
@@ -2965,7 +3012,7 @@ function DesignEditor({ notify }) {
             </div>
           )}
         </div>
-        {["Layer", "Select", "Filter", "View", "Window", "More"].map((menu) => (
+        {["Layer", "Select", "Filter"].map((menu) => (
           <button
             key={menu}
             onClick={() => setOpenMenu(openMenu === menu ? null : menu)}
@@ -2973,8 +3020,12 @@ function DesignEditor({ notify }) {
             {menu}
           </button>
         ))}
+        <div className="menu-wrap"><button className={openMenu === "View" ? "active" : ""} onClick={()=>setOpenMenu(openMenu === "View" ? null : "View")}>View</button>{openMenu === "View" && <div className="file-dropdown view-dropdown"><button onClick={()=>{setShowRulers(!showRulers);setOpenMenu(null)}}><span>{showRulers ? "✓ " : ""}Rulers</span><kbd>Ctrl + R</kbd></button><button onClick={()=>{setZoom(100);setOpenMenu(null)}}><span>Actual size</span><kbd>Ctrl + 1</kbd></button><button onClick={()=>{setZoom(65);setStagePan({x:0,y:0});setOpenMenu(null)}}><span>Fit canvas</span><kbd>Ctrl + 0</kbd></button></div>}</div>
+        {["Window", "More"].map((menu) => (
+          <button key={menu} onClick={() => setOpenMenu(openMenu === menu ? null : menu)}>{menu}</button>
+        ))}
         <div className="pro-menu-spacer" />
-        <button onClick={exportImage}>Export</button>
+        <button onClick={() => exportImage("image/png","png")}>Export</button>
         <Avatar initials="AM" />
       </div>
       <div className="pro-contextbar">
@@ -3055,14 +3106,14 @@ function DesignEditor({ notify }) {
         </nav>
         <aside className="pro-assetpanel">{panelContent()}</aside>
         <section className="pro-stage">
-          <div className="document-tab">
-            <span>{fileName}.mti</span>
-            <X size={13} />
+          <div className="document-tabs">
+            {documents.map((doc)=><button key={doc.id} className={doc.id === (activeDocumentId || documents[0]?.id) ? "active" : ""} onClick={()=>switchDocument(doc.id)}><span>{doc.name}.mti{doc.dirty ? " •" : ""}</span><i onClick={(e)=>{e.stopPropagation();requestCloseDocument(doc)}}><X size={13}/></i></button>)}
           </div>
-          <div className={`pro-artboard-wrap tool-${activeTool.toLowerCase()}`} onPointerMove={moveCanvasAction} onPointerUp={endCanvasAction} onPointerLeave={endCanvasAction} onPointerDown={(e)=>beginCanvasAction(e)} style={{transform:`translate(${stagePan.x}px,${stagePan.y}px)`}}>
+          <div className={`pro-artboard-wrap tool-${activeTool.toLowerCase()} ${showRulers ? "with-rulers" : ""}`} onPointerMove={moveCanvasAction} onPointerUp={endCanvasAction} onPointerLeave={endCanvasAction} onPointerDown={(e)=>beginCanvasAction(e)}>
+            {showRulers && <><div className="canvas-ruler ruler-horizontal">{Array.from({length:21},(_,i)=><span key={i} style={{left:`${i*5}%`}}>{i*100}</span>)}</div><div className="canvas-ruler ruler-vertical">{Array.from({length:21},(_,i)=><span key={i} style={{top:`${i*5}%`}}>{i*100}</span>)}</div></>}
             <div
               className="pro-artboard"
-              style={{ background, width:canvasSize.width, height:canvasSize.height, transform: `scale(${zoom / 100})` }}
+              style={{ background, width:canvasSize.width, height:canvasSize.height, transform: `translate(${stagePan.x}px,${stagePan.y}px) scale(${zoom / 100})` }}
             >
               {layers
                 .slice()
@@ -3099,7 +3150,7 @@ function DesignEditor({ notify }) {
               <svg className="drawing-layer" viewBox={`0 0 ${canvasSize.width} ${canvasSize.height}`}><g>{[...strokes,...(drawing?[drawing]:[])].map(path=><polyline key={path.id} points={path.points.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke={path.color} strokeWidth={path.width} strokeLinecap="round" strokeLinejoin="round"/>)}</g></svg>
             </div>
           </div>
-          <div className="quick-tool-dock">{[["Move",Move],["Hand",Hand],["Pen",PenTool],["Eraser",Eraser],["Brush",Brush],["Fill",PaintBucket]].map(([name,Icon])=><button key={name} className={activeTool===name?"active":""} onClick={()=>{setActiveTool(name);if(name==="Fill"){record("Filled selected layer");selected?.type==="background"?setBackground(drawSettings.color):selected&&updateLayer(selected.id,{color:drawSettings.color})}}} title={`${name} Tool`}><Icon size={18}/><span>{name}</span></button>)}</div>
+          <div className="quick-tool-dock">{[["Move",Move],["Hand",Hand],["Pen",PenTool],["Brush",Brush],["Eraser",Eraser],["Fill",PaintBucket]].map(([name,Icon])=><button key={name} className={activeTool===name?"active":""} onClick={()=>{setActiveTool(name);if(name==="Fill"){record("Filled selected layer");selected?.type==="background"?setBackground(drawSettings.color):selected&&updateLayer(selected.id,{color:drawSettings.color})}}} title={`${name} Tool`}><Icon size={18}/><span>{name}</span></button>)}</div>
           <div className="zoom-control">
             <button onClick={() => setZoom((z) => Math.max(10, z - 10))}>
               <Minus size={14} />
@@ -3237,6 +3288,9 @@ function DesignEditor({ notify }) {
         </aside>
       </div>
       {adjustDialog && <div className="editor-dialog-backdrop"><div className="adjustment-dialog"><header><strong>{controls.find(([key])=>key===adjustDialog)?.[1]}</strong><button onClick={()=>setAdjustDialog(null)}><X size={16}/></button></header><p>Adjust the selected image layer.</p><input type="range" min={controls.find(([key])=>key===adjustDialog)?.[2]} max={controls.find(([key])=>key===adjustDialog)?.[3]} value={selectedAdjustments[adjustDialog]} onChange={(e)=>selected?.type==="image"&&updateLayer(selected.id,{adjustments:{...selectedAdjustments,[adjustDialog]:Number(e.target.value)}})}/><output>{selectedAdjustments[adjustDialog]}</output><footer><button onClick={()=>setAdjustDialog(null)}>Cancel</button><button className="primary" onClick={()=>{record(`Adjusted ${adjustDialog}`);setAdjustDialog(null)}}>Apply</button></footer></div></div>}
+      {closeTarget && <div className="editor-dialog-backdrop"><div className="editor-modal confirm-close"><header><strong>Close unsaved project?</strong><button onClick={()=>setCloseTarget(null)}><X size={16}/></button></header><p>“{closeTarget.name}” contains changes that have not been saved. Closing it will permanently discard those changes.</p><footer><button onClick={()=>setCloseTarget(null)}>Cancel</button><button className="danger-button" onClick={()=>closeDocument(closeTarget.id)}>Close without saving</button></footer></div></div>}
+      {showSaveAs && <div className="editor-dialog-backdrop"><div className="editor-modal save-as-dialog"><header><strong>Save project as image</strong><button onClick={()=>setShowSaveAs(false)}><X size={16}/></button></header><p>Select an image format for the current canvas.</p><div className="format-options"><button onClick={()=>{exportImage("image/jpeg","jpg");setShowSaveAs(false)}}><b>JPG</b><span>Small, widely compatible</span></button><button onClick={()=>{exportImage("image/webp","webp");setShowSaveAs(false)}}><b>WebP</b><span>Modern web image</span></button><button onClick={()=>{exportImage("image/avif","avif");setShowSaveAs(false)}}><b>AVIF</b><span>High-efficiency image</span></button></div></div></div>}
+      {showProjectInfo && <div className="editor-dialog-backdrop"><div className="editor-modal project-info-dialog"><header><strong>Project information</strong><button onClick={()=>setShowProjectInfo(false)}><X size={16}/></button></header><table><tbody><tr><th>Project name</th><td>{fileName}</td></tr><tr><th>Canvas size</th><td>{canvasSize.width} × {canvasSize.height} px</td></tr><tr><th>Layers</th><td>{layers.length}</td></tr><tr><th>Drawing paths</th><td>{strokes.length}</td></tr><tr><th>Status</th><td>{documents.find((doc)=>doc.id === (activeDocumentId || documents[0]?.id))?.dirty ? "Unsaved changes" : "Saved"}</td></tr><tr><th>Format</th><td>Metainspo editable project</td></tr></tbody></table><footer><button className="primary" onClick={()=>setShowProjectInfo(false)}>Done</button></footer></div></div>}
     </main>
   );
 }
