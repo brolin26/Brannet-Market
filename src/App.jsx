@@ -2379,8 +2379,14 @@ function DesignEditor({ notify }) {
   const alignLayer = (layer, alignment) => {
     if (!layer || layer.locked) return;
     const bounds = layer.type === "image" ? imageBounds : layer.type === "shape" ? { left: canvasSize.width / 2 - (layer.size || 120) / 2, top: canvasSize.height / 2 - (layer.size || 120) / 2, width: layer.size || 120, height: layer.size || 120 } : { left: canvasSize.width * .08, top: 55, width: canvasSize.width * .84, height: Math.max(42, (layer.size || 54) * 1.25) };
-    const targetX = alignment === "left" ? -bounds.left : alignment === "right" ? canvasSize.width - bounds.left - bounds.width : alignment === "center" ? canvasSize.width / 2 - (bounds.left + bounds.width / 2) : layer.x || 0;
-    const targetY = alignment === "top" ? -bounds.top : alignment === "bottom" ? canvasSize.height - bounds.top - bounds.height : alignment === "middle" ? canvasSize.height / 2 - (bounds.top + bounds.height / 2) : layer.y || 0;
+    const sx = Math.abs(layer.scaleX || 1);
+    const sy = Math.abs(layer.scaleY || 1);
+    const scaledLeftOffset = bounds.left + (bounds.width * (1 - sx)) / 2;
+    const scaledTopOffset = bounds.top + (bounds.height * (1 - sy)) / 2;
+    const scaledWidth = bounds.width * sx;
+    const scaledHeight = bounds.height * sy;
+    const targetX = alignment === "left" ? -scaledLeftOffset : alignment === "right" ? canvasSize.width - scaledLeftOffset - scaledWidth : alignment === "center" ? canvasSize.width / 2 - (scaledLeftOffset + scaledWidth / 2) : layer.x || 0;
+    const targetY = alignment === "top" ? -scaledTopOffset : alignment === "bottom" ? canvasSize.height - scaledTopOffset - scaledHeight : alignment === "middle" ? canvasSize.height / 2 - (scaledTopOffset + scaledHeight / 2) : layer.y || 0;
     const changes = ["left","right","center"].includes(alignment) ? { x: targetX } : { y: targetY };
     updateLayer(layer.id, changes);
     record(`Aligned ${layer.name} ${alignment}`);
@@ -3184,44 +3190,6 @@ function DesignEditor({ notify }) {
         <label>
           Opacity <input type="number" defaultValue="100" />
         </label>
-        <div className="alignment-tools">
-          <button title="Align left" onClick={() => record("Aligned left")}>
-            <span>│◀</span>
-          </button>
-          <button
-            title="Align horizontal center"
-            onClick={() => record("Aligned center")}
-          >
-            <AlignCenter size={16} />
-          </button>
-          <button title="Align right" onClick={() => record("Aligned right")}>
-            <span>▶│</span>
-          </button>
-          <button title="Align top" onClick={() => record("Aligned top")}>
-            <span>━▲</span>
-          </button>
-          <button
-            title="Align vertical center"
-            onClick={() => record("Aligned middle")}
-          >
-            <span>═</span>
-          </button>
-          <button title="Align bottom" onClick={() => record("Aligned bottom")}>
-            <span>▼━</span>
-          </button>
-          <button
-            title="Distribute horizontally"
-            onClick={() => record("Distributed horizontally")}
-          >
-            <span>↔</span>
-          </button>
-          <button
-            title="Distribute vertically"
-            onClick={() => record("Distributed vertically")}
-          >
-            <span>↕</span>
-          </button>
-        </div>
         <div className="pro-context-spacer" />
         <button onClick={duplicateLayer} title="Duplicate">
           <Copy size={16} />
