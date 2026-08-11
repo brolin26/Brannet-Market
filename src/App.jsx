@@ -2194,6 +2194,7 @@ function DesignEditor({ notify }) {
   const [showProjectInfo, setShowProjectInfo] = useState(false);
   const [showSaveAs, setShowSaveAs] = useState(false);
   const [showRulers, setShowRulers] = useState(false);
+  const pointerTrackingRef = useRef(false);
   const undoStack = useRef([]);
   const redoStack = useRef([]);
   const dragRef = useRef(null);
@@ -2286,11 +2287,18 @@ function DesignEditor({ notify }) {
     const rect = e.currentTarget.closest(".pro-artboard")?.getBoundingClientRect() || e.currentTarget.getBoundingClientRect();
     if (activeTool === "Hand") {
       dragRef.current = { type: "hand", startX: e.clientX, startY: e.clientY, pan: stagePan };
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+      window.addEventListener("pointermove", moveCanvasAction);
+      window.addEventListener("pointerup", endCanvasAction);
+      pointerTrackingRef.current = true;
       return;
     }
     if (activeTool === "Move" && layer && !layer.locked) {
-      e.stopPropagation(); setSelectedLayer(layer.id); record(`Moved ${layer.name}`);
+      e.stopPropagation(); e.currentTarget.setPointerCapture?.(e.pointerId); setSelectedLayer(layer.id); record(`Moved ${layer.name}`);
       dragRef.current = { type: "move", id: layer.id, startX: e.clientX, startY: e.clientY, x: layer.x || 0, y: layer.y || 0 };
+      window.addEventListener("pointermove", moveCanvasAction);
+      window.addEventListener("pointerup", endCanvasAction);
+      pointerTrackingRef.current = true;
       return;
     }
     if (["Pen", "Brush", "Eraser"].includes(activeTool)) {
@@ -2314,6 +2322,11 @@ function DesignEditor({ notify }) {
     }
   };
   const endCanvasAction = () => {
+    if (pointerTrackingRef.current) {
+      window.removeEventListener("pointermove", moveCanvasAction);
+      window.removeEventListener("pointerup", endCanvasAction);
+      pointerTrackingRef.current = false;
+    }
     dragRef.current = null;
     if (drawing) { setStrokes((all) => [...all, drawing]); setDrawing(null); }
   };
