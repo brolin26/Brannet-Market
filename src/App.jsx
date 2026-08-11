@@ -2195,6 +2195,7 @@ function DesignEditor({ notify }) {
   const [showSaveAs, setShowSaveAs] = useState(false);
   const [showRulers, setShowRulers] = useState(false);
   const pointerTrackingRef = useRef(false);
+  const transformRef = useRef(null);
   const undoStack = useRef([]);
   const redoStack = useRef([]);
   const dragRef = useRef(null);
@@ -2276,6 +2277,39 @@ function DesignEditor({ notify }) {
         layer.id === id ? { ...layer, ...values } : layer,
       ),
     );
+  const layerTransform = (layer) => `translate(${layer.x || 0}px,${layer.y || 0}px) rotate(${layer.rotation || 0}deg) skew(${layer.skewX || 0}deg,${layer.skewY || 0}deg) scale(${layer.scaleX || 1},${layer.scaleY || 1})`;
+  const beginTransform = (e, type, layer) => {
+    if (!layer || layer.locked) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const box = e.currentTarget.closest(".transform-box")?.getBoundingClientRect();
+    if (!box) return;
+    const center = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+    const startAngle = Math.atan2(e.clientY - center.y, e.clientX - center.x);
+    const startDistance = Math.max(1, Math.hypot(e.clientX - center.x, e.clientY - center.y));
+    transformRef.current = { type, id: layer.id, startX: e.clientX, startY: e.clientY, center, startAngle, startDistance, scaleX: layer.scaleX || 1, scaleY: layer.scaleY || 1, rotation: layer.rotation || 0, skewX: layer.skewX || 0, skewY: layer.skewY || 0 };
+    const moveTransform = (event) => {
+      const session = transformRef.current;
+      if (!session) return;
+      setLayers((all) => all.map((item) => {
+        if (item.id !== session.id) return item;
+        if (session.type === "rotate") {
+          const angle = Math.atan2(event.clientY - session.center.y, event.clientX - session.center.x);
+          return { ...item, rotation: session.rotation + ((angle - session.startAngle) * 180) / Math.PI };
+        }
+        if (session.type === "skewX") return { ...item, skewX: session.skewX + (event.clientX - session.startX) / 4 };
+        if (session.type === "skewY") return { ...item, skewY: session.skewY + (event.clientY - session.startY) / 4 };
+        const distance = Math.max(8, Math.hypot(event.clientX - session.center.x, event.clientY - session.center.y));
+        const ratio = distance / session.startDistance;
+        const uniform = session.type === "scale-uniform";
+        return { ...item, scaleX: Math.max(0.05, session.scaleX * (uniform ? ratio : 1 + (event.clientX - session.startX) / Math.max(50, box.width))), scaleY: Math.max(0.05, session.scaleY * (uniform ? ratio : 1 + (event.clientY - session.startY) / Math.max(50, box.height))) };
+      }));
+    };
+    const endTransform = () => { window.removeEventListener("pointermove", moveTransform); window.removeEventListener("pointerup", endTransform); window.removeEventListener("pointercancel", endTransform); transformRef.current = null; };
+    window.addEventListener("pointermove", moveTransform);
+    window.addEventListener("pointerup", endTransform);
+    window.addEventListener("pointercancel", endTransform);
+  };
   const toggleLock = (id) => {
     const layer = layers.find((x) => x.id === id);
     if (!layer || layer.type === "background") return;
@@ -3156,7 +3190,7 @@ function DesignEditor({ notify }) {
                       ref={imgRef}
                       key={layer.id}
                       src={layer.src || imageUrl}
-                      style={{ filter: layerFilter(layer), transform:`translate(${layer.x||0}px,${layer.y||0}px)` }}
+                      style={{ filter: layerFilter(layer), transform: layerTransform(layer) }}
                       onClick={() => setSelectedLayer(layer.id)}
                       onPointerDown={(e)=>beginCanvasAction(e,layer)}
                     />
@@ -3164,7 +3198,7 @@ function DesignEditor({ notify }) {
                     <div
                       key={layer.id}
                       className={`canvas-text ${selectedLayer === layer.id ? "selected" : ""}`}
-                      style={{ color: layer.fillType === "gradient" ? "transparent" : layer.color, backgroundImage: layer.fillType === "gradient" ? `linear-gradient(90deg,${layer.color},${layer.gradientColor})` : "none", backgroundClip: layer.fillType === "gradient" ? "text" : "border-box", WebkitBackgroundClip: layer.fillType === "gradient" ? "text" : "border-box", WebkitTextStroke:`${layer.strokeWidth||0}px ${layer.strokeColor||"transparent"}`, fontSize: layer.size, transform:`translate(${layer.x||0}px,${layer.y||0}px)` }}
+                      style={{ color: layer.fillType === "gradient" ? "transparent" : layer.color, backgroundImage: layer.fillType === "gradient" ? `linear-gradient(90deg,${layer.color},${layer.gradientColor})` : "none", backgroundClip: layer.fillType === "gradient" ? "text" : "border-box", WebkitBackgroundClip: layer.fillType === "gradient" ? "text" : "border-box", WebkitTextStroke:`${layer.strokeWidth||0}px ${layer.strokeColor||"transparent"}`, fontSize: layer.size, transform: layerTransform(layer) }}
                       onClick={() => setSelectedLayer(layer.id)}
                       onPointerDown={(e)=>beginCanvasAction(e,layer)}
                       contentEditable
@@ -3177,8 +3211,20 @@ function DesignEditor({ notify }) {
                     >
                       {layer.text}
                     </div>
-                  ) : layer.visible && layer.type === "shape" ? <div key={layer.id} className={`canvas-shape ${layer.shape}`} style={{'--shape-color':layer.color,width:layer.size,height:layer.size,transform:`translate(${layer.x||0}px,${layer.y||0}px)`}} onPointerDown={(e)=>beginCanvasAction(e,layer)} onClick={()=>setSelectedLayer(layer.id)}>{layer.shape === "star" && <Star size={layer.size} fill={layer.color}/>}</div> : null,
+                  ) : layer.visible && layer.type === "shape" ? <div key={layer.id} className={`canvas-shape ${layer.shape}`} style={{'--shape-color':layer.color,width:layer.size,height:layer.size,transform:layerTransform(layer)}} onPointerDown={(e)=>beginCanvasAction(e,layer)} onClick={()=>setSelectedLayer(layer.id)}>{layer.shape === "star" && <Star size={layer.size} fill={layer.color}/>}</div> : null,
                 )}
+              {selected && selected.type !== "background" && selected.visible && <div className={`transform-box transform-${selected.type}`} style={selected.type === "image" ? { left:0, top:0, width:"100%", height:"100%", transform: layerTransform(selected) } : selected.type === "text" ? { left:"8%", top:55, width:"84%", height:Math.max(42,(selected.size || 54) * 1.25), transform:layerTransform(selected) } : { left:"50%", top:"50%", width:selected.size || 120, height:selected.size || 120, marginLeft:-(selected.size || 120)/2, marginTop:-(selected.size || 120)/2, transform:layerTransform(selected) }}>
+                <span className="transform-outline" />
+                <button className="transform-handle handle-nw" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale",selected)} />
+                <button className="transform-handle handle-ne" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale",selected)} />
+                <button className="transform-handle handle-sw" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale",selected)} />
+                <button className="transform-handle handle-se" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale-uniform",selected)} />
+                <button className="transform-handle handle-n" aria-label="Skew layer horizontally" onPointerDown={(e)=>beginTransform(e,"skewX",selected)} />
+                <button className="transform-handle handle-e" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale",selected)} />
+                <button className="transform-handle handle-s" aria-label="Skew layer vertically" onPointerDown={(e)=>beginTransform(e,"skewY",selected)} />
+                <button className="transform-handle handle-w" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale",selected)} />
+                <button className="transform-rotate" aria-label="Rotate layer" onPointerDown={(e)=>beginTransform(e,"rotate",selected)}><RotateCcw size={12}/></button>
+              </div>}
               <svg className="drawing-layer" viewBox={`0 0 ${canvasSize.width} ${canvasSize.height}`}><g>{[...strokes,...(drawing?[drawing]:[])].map(path=><polyline key={path.id} points={path.points.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke={path.color} strokeWidth={path.width} strokeLinecap="round" strokeLinejoin="round"/>)}</g></svg>
             </div>
           </div>
