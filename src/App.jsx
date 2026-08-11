@@ -2165,7 +2165,8 @@ function DesignEditor({ notify }) {
   const [imageUrl, setImageUrl] = useState("");
   const [imageDimensions, setImageDimensions] = useState(null);
   const [fileName, setFileName] = useState("Untitled design");
-  const [activeTool, setActiveTool] = useState("Upload");
+  const [activeTool, setActiveTool] = useState("Move");
+  const [panelTool, setPanelTool] = useState("Upload");
   const [zoom, setZoom] = useState(65);
   const [background, setBackground] = useState("#ffffff");
   const [adjustments, setAdjustments] = useState({
@@ -2699,6 +2700,7 @@ function DesignEditor({ notify }) {
   const addTextPreset = (preset) => { addText(); setTimeout(() => setLayers((all) => all.map((layer, i) => i === 0 ? {...layer, text:preset.text, name:preset.text, size:preset.size} : layer)), 0); };
   const addShape = (shape) => { const id=`shape-${Date.now()}`; record(`Added ${shape.shape}`); setLayers((all) => [{id,name:shape.shape,type:"shape",shape:shape.shape,visible:true,locked:false,color:drawSettings.color,size:140,x:0,y:0},...all]); setSelectedLayer(id); };
   const panelContent = () => {
+    const activeTool = panelTool;
     if (activeTool === "Upload")
       return (
         <div className="pro-panel-content">
@@ -2823,6 +2825,12 @@ function DesignEditor({ notify }) {
   };
   useEffect(() => {
     const shortcuts = (e) => {
+      const tag = e.target?.tagName;
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !["INPUT","TEXTAREA","SELECT"].includes(tag) && !e.target?.isContentEditable) {
+        const toolShortcuts = { v:"Move", h:"Hand", p:"Pen", b:"Brush", e:"Eraser", g:"Fill" };
+        const nextTool = toolShortcuts[e.key.toLowerCase()];
+        if (nextTool) { e.preventDefault(); setActiveTool(nextTool); return; }
+      }
       if (!(e.ctrlKey || e.metaKey)) return;
       if (e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       if (e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
@@ -3091,7 +3099,7 @@ function DesignEditor({ notify }) {
               <i />
               <button
                 onClick={() => {
-                  setActiveTool("Resize");
+                  setPanelTool("Resize");
                   setOpenMenu(null);
                 }}
               >
@@ -3100,7 +3108,7 @@ function DesignEditor({ notify }) {
               </button>
               <button
                 onClick={() => {
-                  setActiveTool("Resize");
+                  setPanelTool("Resize");
                   setOpenMenu(null);
                 }}
               >
@@ -3207,7 +3215,7 @@ function DesignEditor({ notify }) {
             <button
               key={name}
               className={activeTool === name ? "active" : ""}
-              onClick={() => setActiveTool(name)}
+              onClick={() => setPanelTool(name)}
             >
               <Icon size={18} />
               <span>{name}</span>
