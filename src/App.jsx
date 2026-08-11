@@ -2164,6 +2164,7 @@ function SettingsPanel({ user }) {
 function DesignEditor({ notify }) {
   const [imageUrl, setImageUrl] = useState("");
   const [imageDimensions, setImageDimensions] = useState(null);
+  const [textBounds, setTextBounds] = useState({ left: 96, top: 55, width: 260, height: 68 });
   const [fileName, setFileName] = useState("Untitled design");
   const [activeTool, setActiveTool] = useState("Move");
   const [panelTool, setPanelTool] = useState("Upload");
@@ -3251,6 +3252,7 @@ function DesignEditor({ notify }) {
                     <div
                       key={layer.id}
                       className={`canvas-text ${selectedLayer === layer.id ? "selected" : ""}`}
+                      ref={(node)=>{if(node && layer.id === selectedLayer){const next={left:node.offsetLeft,top:node.offsetTop,width:node.offsetWidth,height:node.offsetHeight};if(next.width!==textBounds.width||next.height!==textBounds.height||next.left!==textBounds.left||next.top!==textBounds.top)setTextBounds(next)}}}
                       style={{ color: layer.fillType === "gradient" ? "transparent" : layer.color, backgroundImage: layer.fillType === "gradient" ? `linear-gradient(90deg,${layer.color},${layer.gradientColor})` : "none", backgroundClip: layer.fillType === "gradient" ? "text" : "border-box", WebkitBackgroundClip: layer.fillType === "gradient" ? "text" : "border-box", WebkitTextStroke:`${layer.strokeWidth||0}px ${layer.strokeColor||"transparent"}`, fontSize: layer.size, transform: layerTransform(layer), ...layerPerspectiveStyle(layer) }}
                       onClick={() => setSelectedLayer(layer.id)}
                       onContextMenu={(e)=>{e.preventDefault();setSelectedLayer(layer.id);setTransformMenu({x:e.clientX,y:e.clientY,layerId:layer.id})}}
@@ -3267,7 +3269,7 @@ function DesignEditor({ notify }) {
                     </div>
                   ) : layer.visible && layer.type === "shape" ? <div key={layer.id} className={`canvas-shape ${layer.shape}`} style={{'--shape-color':layer.color,width:layer.size,height:layer.size,transform:layerTransform(layer),...layerPerspectiveStyle(layer)}} onPointerDown={(e)=>beginCanvasAction(e,layer)} onClick={()=>setSelectedLayer(layer.id)} onContextMenu={(e)=>{e.preventDefault();setSelectedLayer(layer.id);setTransformMenu({x:e.clientX,y:e.clientY,layerId:layer.id})}}>{layer.shape === "star" && <Star size={layer.size} fill={layer.color}/>}</div> : null,
                 )}
-              {selected && selected.type !== "background" && selected.visible && <div className={`transform-box transform-${selected.type} mode-${transformMode}`} style={selected.type === "image" ? { left:imageBounds.left, top:imageBounds.top, width:imageBounds.width, height:imageBounds.height, transform: layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) } : selected.type === "text" ? { left:"8%", top:55, width:"84%", height:Math.max(42,(selected.size || 54) * 1.25), transform:layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) } : { left:"50%", top:"50%", width:selected.size || 120, height:selected.size || 120, marginLeft:-(selected.size || 120)/2, marginTop:-(selected.size || 120)/2, transform:layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) }}>
+              {selected && selected.type !== "background" && selected.visible && <div className={`transform-box transform-${selected.type} mode-${transformMode}`} style={selected.type === "image" ? { left:imageBounds.left, top:imageBounds.top, width:imageBounds.width, height:imageBounds.height, transform: layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) } : selected.type === "text" ? { left:textBounds.left, top:textBounds.top, width:textBounds.width, height:textBounds.height, transform:layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) } : { left:"50%", top:"50%", width:selected.size || 120, height:selected.size || 120, marginLeft:-(selected.size || 120)/2, marginTop:-(selected.size || 120)/2, transform:layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) }}>
                 <span className="transform-outline" />
                 <button data-corner="0" className="transform-handle handle-nw" aria-label="Transform layer corner" onPointerDown={(e)=>beginTransform(e,transformMode === "perspective" ? "perspective-corner" : "scale-uniform",selected)} />
                 <button data-corner="1" className="transform-handle handle-ne" aria-label="Transform layer corner" onPointerDown={(e)=>beginTransform(e,transformMode === "perspective" ? "perspective-corner" : "scale-uniform",selected)} />
