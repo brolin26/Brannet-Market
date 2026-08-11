@@ -2194,6 +2194,7 @@ function DesignEditor({ notify }) {
   const [showProjectInfo, setShowProjectInfo] = useState(false);
   const [showSaveAs, setShowSaveAs] = useState(false);
   const [showRulers, setShowRulers] = useState(false);
+  const [transformMenu, setTransformMenu] = useState(null);
   const pointerTrackingRef = useRef(false);
   const transformRef = useRef(null);
   const undoStack = useRef([]);
@@ -2277,7 +2278,7 @@ function DesignEditor({ notify }) {
         layer.id === id ? { ...layer, ...values } : layer,
       ),
     );
-  const layerTransform = (layer) => `translate(${layer.x || 0}px,${layer.y || 0}px) rotate(${layer.rotation || 0}deg) skew(${layer.skewX || 0}deg,${layer.skewY || 0}deg) scale(${layer.scaleX || 1},${layer.scaleY || 1})`;
+  const layerTransform = (layer) => `${layer.perspective ? `perspective(${layer.perspective}px) ` : ""}translate(${layer.x || 0}px,${layer.y || 0}px) rotate(${layer.rotation || 0}deg) skew(${layer.skewX || 0}deg,${layer.skewY || 0}deg) scale(${layer.scaleX || 1},${layer.scaleY || 1})`;
   const beginTransform = (e, type, layer) => {
     if (!layer || layer.locked) return;
     e.preventDefault();
@@ -2299,6 +2300,7 @@ function DesignEditor({ notify }) {
         }
         if (session.type === "skewX") return { ...item, skewX: session.skewX + (event.clientX - session.startX) / 4 };
         if (session.type === "skewY") return { ...item, skewY: session.skewY + (event.clientY - session.startY) / 4 };
+        if (session.type === "perspective") return { ...item, perspective: Math.max(0, Math.min(2000, (item.perspective || 0) + (event.clientY - session.startY) * 3)) };
         const distance = Math.max(8, Math.hypot(event.clientX - session.center.x, event.clientY - session.center.y));
         const ratio = distance / session.startDistance;
         const uniform = session.type === "scale-uniform";
@@ -2309,6 +2311,16 @@ function DesignEditor({ notify }) {
     window.addEventListener("pointermove", moveTransform);
     window.addEventListener("pointerup", endTransform);
     window.addEventListener("pointercancel", endTransform);
+  };
+  const applyTransformCommand = (command, layer) => {
+    if (!layer || layer.locked) return;
+    if (command === "flipX") updateLayer(layer.id, { scaleX: -(layer.scaleX || 1) });
+    if (command === "flipY") updateLayer(layer.id, { scaleY: -(layer.scaleY || 1) });
+    if (command === "skew") updateLayer(layer.id, { skewX: (layer.skewX || 0) + 12 });
+    if (command === "warp") updateLayer(layer.id, { skewX: (layer.skewX || 0) + 8, skewY: (layer.skewY || 0) - 8 });
+    if (command === "perspective") updateLayer(layer.id, { perspective: (layer.perspective || 0) + 300 });
+    record(`${command} ${layer.name}`);
+    setTransformMenu(null);
   };
   const toggleLock = (id) => {
     const layer = layers.find((x) => x.id === id);
@@ -3192,6 +3204,7 @@ function DesignEditor({ notify }) {
                       src={layer.src || imageUrl}
                       style={{ filter: layerFilter(layer), transform: layerTransform(layer) }}
                       onClick={() => setSelectedLayer(layer.id)}
+                      onContextMenu={(e)=>{e.preventDefault();setSelectedLayer(layer.id);setTransformMenu({x:e.clientX,y:e.clientY,layerId:layer.id})}}
                       onPointerDown={(e)=>beginCanvasAction(e,layer)}
                     />
                   ) : layer.visible && layer.type === "text" ? (
@@ -3200,6 +3213,7 @@ function DesignEditor({ notify }) {
                       className={`canvas-text ${selectedLayer === layer.id ? "selected" : ""}`}
                       style={{ color: layer.fillType === "gradient" ? "transparent" : layer.color, backgroundImage: layer.fillType === "gradient" ? `linear-gradient(90deg,${layer.color},${layer.gradientColor})` : "none", backgroundClip: layer.fillType === "gradient" ? "text" : "border-box", WebkitBackgroundClip: layer.fillType === "gradient" ? "text" : "border-box", WebkitTextStroke:`${layer.strokeWidth||0}px ${layer.strokeColor||"transparent"}`, fontSize: layer.size, transform: layerTransform(layer) }}
                       onClick={() => setSelectedLayer(layer.id)}
+                      onContextMenu={(e)=>{e.preventDefault();setSelectedLayer(layer.id);setTransformMenu({x:e.clientX,y:e.clientY,layerId:layer.id})}}
                       onPointerDown={(e)=>beginCanvasAction(e,layer)}
                       contentEditable
                       suppressContentEditableWarning
@@ -3211,18 +3225,18 @@ function DesignEditor({ notify }) {
                     >
                       {layer.text}
                     </div>
-                  ) : layer.visible && layer.type === "shape" ? <div key={layer.id} className={`canvas-shape ${layer.shape}`} style={{'--shape-color':layer.color,width:layer.size,height:layer.size,transform:layerTransform(layer)}} onPointerDown={(e)=>beginCanvasAction(e,layer)} onClick={()=>setSelectedLayer(layer.id)}>{layer.shape === "star" && <Star size={layer.size} fill={layer.color}/>}</div> : null,
+                  ) : layer.visible && layer.type === "shape" ? <div key={layer.id} className={`canvas-shape ${layer.shape}`} style={{'--shape-color':layer.color,width:layer.size,height:layer.size,transform:layerTransform(layer)}} onPointerDown={(e)=>beginCanvasAction(e,layer)} onClick={()=>setSelectedLayer(layer.id)} onContextMenu={(e)=>{e.preventDefault();setSelectedLayer(layer.id);setTransformMenu({x:e.clientX,y:e.clientY,layerId:layer.id})}}>{layer.shape === "star" && <Star size={layer.size} fill={layer.color}/>}</div> : null,
                 )}
               {selected && selected.type !== "background" && selected.visible && <div className={`transform-box transform-${selected.type}`} style={selected.type === "image" ? { left:0, top:0, width:"100%", height:"100%", transform: layerTransform(selected) } : selected.type === "text" ? { left:"8%", top:55, width:"84%", height:Math.max(42,(selected.size || 54) * 1.25), transform:layerTransform(selected) } : { left:"50%", top:"50%", width:selected.size || 120, height:selected.size || 120, marginLeft:-(selected.size || 120)/2, marginTop:-(selected.size || 120)/2, transform:layerTransform(selected) }}>
                 <span className="transform-outline" />
-                <button className="transform-handle handle-nw" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale",selected)} />
-                <button className="transform-handle handle-ne" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale",selected)} />
-                <button className="transform-handle handle-sw" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale",selected)} />
+                <button className="transform-handle handle-nw" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale-uniform",selected)} />
+                <button className="transform-handle handle-ne" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale-uniform",selected)} />
+                <button className="transform-handle handle-sw" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale-uniform",selected)} />
                 <button className="transform-handle handle-se" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale-uniform",selected)} />
                 <button className="transform-handle handle-n" aria-label="Skew layer horizontally" onPointerDown={(e)=>beginTransform(e,"skewX",selected)} />
-                <button className="transform-handle handle-e" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale",selected)} />
+                <button className="transform-handle handle-e" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale-uniform",selected)} />
                 <button className="transform-handle handle-s" aria-label="Skew layer vertically" onPointerDown={(e)=>beginTransform(e,"skewY",selected)} />
-                <button className="transform-handle handle-w" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale",selected)} />
+                <button className="transform-handle handle-w" aria-label="Scale layer" onPointerDown={(e)=>beginTransform(e,"scale-uniform",selected)} />
                 <button className="transform-rotate" aria-label="Rotate layer" onPointerDown={(e)=>beginTransform(e,"rotate",selected)}><RotateCcw size={12}/></button>
               </div>}
               <svg className="drawing-layer" viewBox={`0 0 ${canvasSize.width} ${canvasSize.height}`}><g>{[...strokes,...(drawing?[drawing]:[])].map(path=><polyline key={path.id} points={path.points.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke={path.color} strokeWidth={path.width} strokeLinecap="round" strokeLinejoin="round"/>)}</g></svg>
@@ -3248,6 +3262,7 @@ function DesignEditor({ notify }) {
             <div className="layer-properties">
               <p className="eyebrow">SELECTED LAYER</p>
               <strong>{selected.name}</strong>
+              {selected.type !== "background" && <div className="transform-properties"><p className="eyebrow">TRANSFORM</p><div className="transform-grid"><label>X<input type="number" value={Math.round(selected.x || 0)} onChange={(e)=>updateLayer(selected.id,{x:Number(e.target.value)})}/></label><label>Y<input type="number" value={Math.round(selected.y || 0)} onChange={(e)=>updateLayer(selected.id,{y:Number(e.target.value)})}/></label><label>Scale X<input type="number" step="0.01" value={Number(selected.scaleX || 1).toFixed(2)} onChange={(e)=>updateLayer(selected.id,{scaleX:Number(e.target.value) || 0.05})}/></label><label>Scale Y<input type="number" step="0.01" value={Number(selected.scaleY || 1).toFixed(2)} onChange={(e)=>updateLayer(selected.id,{scaleY:Number(e.target.value) || 0.05})}/></label><label>Rotation<input type="number" value={Math.round(selected.rotation || 0)} onChange={(e)=>updateLayer(selected.id,{rotation:Number(e.target.value)})}/></label><label>Perspective<input type="number" min="0" value={Math.round(selected.perspective || 0)} onChange={(e)=>updateLayer(selected.id,{perspective:Number(e.target.value)})}/></label><label>Skew X<input type="number" value={Math.round(selected.skewX || 0)} onChange={(e)=>updateLayer(selected.id,{skewX:Number(e.target.value)})}/></label><label>Skew Y<input type="number" value={Math.round(selected.skewY || 0)} onChange={(e)=>updateLayer(selected.id,{skewY:Number(e.target.value)})}/></label></div><div className="transform-property-actions"><button onClick={()=>applyTransformCommand("flipX",selected)}>Flip H</button><button onClick={()=>applyTransformCommand("flipY",selected)}>Flip V</button><button onClick={()=>applyTransformCommand("warp",selected)}>Warp</button><button onClick={()=>applyTransformCommand("perspective",selected)}>Perspective</button></div></div>}
               {selected.type === "text" && (
                 <>
                   <label>
@@ -3369,6 +3384,7 @@ function DesignEditor({ notify }) {
       {closeTarget && <div className="editor-dialog-backdrop"><div className="editor-modal confirm-close"><header><strong>Close unsaved project?</strong><button onClick={()=>setCloseTarget(null)}><X size={16}/></button></header><p>“{closeTarget.name}” contains changes that have not been saved. Closing it will permanently discard those changes.</p><footer><button onClick={()=>setCloseTarget(null)}>Cancel</button><button className="danger-button" onClick={()=>closeDocument(closeTarget.id)}>Close without saving</button></footer></div></div>}
       {showSaveAs && <div className="editor-dialog-backdrop"><div className="editor-modal save-as-dialog"><header><strong>Save project as image</strong><button onClick={()=>setShowSaveAs(false)}><X size={16}/></button></header><p>Select an image format for the current canvas.</p><div className="format-options"><button onClick={()=>{exportImage("image/jpeg","jpg");setShowSaveAs(false)}}><b>JPG</b><span>Small, widely compatible</span></button><button onClick={()=>{exportImage("image/webp","webp");setShowSaveAs(false)}}><b>WebP</b><span>Modern web image</span></button><button onClick={()=>{exportImage("image/avif","avif");setShowSaveAs(false)}}><b>AVIF</b><span>High-efficiency image</span></button></div></div></div>}
       {showProjectInfo && <div className="editor-dialog-backdrop"><div className="editor-modal project-info-dialog"><header><strong>Project information</strong><button onClick={()=>setShowProjectInfo(false)}><X size={16}/></button></header><table><tbody><tr><th>Project name</th><td>{fileName}</td></tr><tr><th>Canvas size</th><td>{canvasSize.width} × {canvasSize.height} px</td></tr><tr><th>Layers</th><td>{layers.length}</td></tr><tr><th>Drawing paths</th><td>{strokes.length}</td></tr><tr><th>Status</th><td>{documents.find((doc)=>doc.id === (activeDocumentId || documents[0]?.id))?.dirty ? "Unsaved changes" : "Saved"}</td></tr><tr><th>Format</th><td>Metainspo editable project</td></tr></tbody></table><footer><button className="primary" onClick={()=>setShowProjectInfo(false)}>Done</button></footer></div></div>}
+      {transformMenu && <div className="transform-context-menu" style={{left:transformMenu.x,top:transformMenu.y}} onMouseLeave={()=>setTransformMenu(null)}><strong>Transform</strong><button onClick={()=>applyTransformCommand("skew",layers.find((item)=>item.id===transformMenu.layerId))}>Skew</button><button onClick={()=>applyTransformCommand("warp",layers.find((item)=>item.id===transformMenu.layerId))}>Warp</button><button onClick={()=>applyTransformCommand("perspective",layers.find((item)=>item.id===transformMenu.layerId))}>Perspective</button><i/><button onClick={()=>applyTransformCommand("flipX",layers.find((item)=>item.id===transformMenu.layerId))}>Flip Horizontal</button><button onClick={()=>applyTransformCommand("flipY",layers.find((item)=>item.id===transformMenu.layerId))}>Flip Vertical</button></div>}
     </main>
   );
 }
