@@ -41,6 +41,7 @@ import {
   Package,
   Upload,
   Lock,
+  Unlock,
   Mail,
   Pencil,
   PenTool,
@@ -2702,6 +2703,7 @@ function DesignEditor({ notify }) {
   const addShape = (shape) => { const id=`shape-${Date.now()}`; record(`Added ${shape.shape}`); setLayers((all) => [{id,name:shape.shape,type:"shape",shape:shape.shape,visible:true,locked:false,color:drawSettings.color,size:140,x:0,y:0},...all]); setSelectedLayer(id); };
   const panelContent = () => {
     const activeTool = panelTool;
+    if (activeTool === "Layers") return <div className="pro-panel-content left-layers-panel"><div className="layers-title"><strong>Layers</strong><div><button onClick={duplicateLayer}><Copy size={14}/></button><button onClick={removeLayer}><Trash2 size={14}/></button></div></div>{layers.map((layer)=><button key={layer.id} className={`left-layer-row ${selectedLayer===layer.id?"active":""}`} onClick={()=>setSelectedLayer(layer.id)}><span onClick={(e)=>{e.stopPropagation();updateLayer(layer.id,{visible:!layer.visible})}}>{layer.visible?<Eye size={14}/>:<EyeOff size={14}/>}</span><i>{layer.type === "image" && (layer.src || imageUrl) ? <img src={layer.src || imageUrl}/> : layer.type === "text" ? <Type size={14}/> : <Palette size={14}/>}</i><strong>{layer.name}</strong><span onClick={(e)=>{e.stopPropagation();toggleLock(layer.id)}}>{layer.locked?<Lock size={12}/>:<Unlock size={12}/>}</span></button>)}</div>;
     if (activeTool === "Upload")
       return (
         <div className="pro-panel-content">
@@ -3212,6 +3214,7 @@ function DesignEditor({ notify }) {
       </div>
       <div className="pro-body">
         <nav className="pro-toolrail">
+          <button className={panelTool === "Layers" ? "active" : ""} onClick={() => setPanelTool("Layers")}><Layers3 size={18}/><span>Layers</span></button>
           {tools.map(([name, Icon]) => (
             <button
               key={name}
@@ -3374,7 +3377,7 @@ function DesignEditor({ notify }) {
               )}
             </div>
           )}
-          <div className="layers-panel">
+          <div className="layers-panel right-layers-panel">
             <div className="layers-title">
               <strong>Layers</strong>
               <div>
