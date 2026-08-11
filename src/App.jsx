@@ -2204,6 +2204,7 @@ function DesignEditor({ notify }) {
   const [transformMenu, setTransformMenu] = useState(null);
   const [transformMode, setTransformMode] = useState("normal");
   const [scaleLinked, setScaleLinked] = useState(true);
+  const [perspective3d, setPerspective3d] = useState({ x: 0, y: 0, z: 700, rotateX: 0, rotateY: 0, rotateZ: 0 });
   const pointerTrackingRef = useRef(false);
   const transformRef = useRef(null);
   const undoStack = useRef([]);
@@ -2301,7 +2302,8 @@ function DesignEditor({ notify }) {
   };
   const layerTransform = (layer) => {
     const points = layer.perspectivePoints;
-    const perspective = points ? `perspective(${layer.perspective || 700}px) rotateX(${((points[2].y + points[3].y - points[0].y - points[1].y) / 4) * 0.45}deg) rotateY(${((points[1].x + points[2].x - points[0].x - points[3].x) / 4) * -0.45}deg)` : "";
+    const space = layer.perspective3d || {};
+    const perspective = points ? `perspective(${space.z || layer.perspective || 700}px) translate3d(${space.x || 0}px,${space.y || 0}px,0) rotateX(${space.rotateX || 0}deg) rotateY(${space.rotateY || 0}deg) rotateZ(${space.rotateZ || 0}deg) rotateX(${((points[2].y + points[3].y - points[0].y - points[1].y) / 4) * 0.45}deg) rotateY(${((points[1].x + points[2].x - points[0].x - points[3].x) / 4) * -0.45}deg)` : "";
     return `${perspective} translate(${layer.x || 0}px,${layer.y || 0}px) rotate(${layer.rotation || 0}deg) skew(${layer.skewX || 0}deg,${layer.skewY || 0}deg) scale(${layer.scaleX || 1},${layer.scaleY || 1})`;
   };
   const layerPerspectiveStyle = () => ({});
@@ -2356,7 +2358,7 @@ function DesignEditor({ notify }) {
     if (command === "flipX") updateLayer(layer.id, { scaleX: -(layer.scaleX || 1) });
     if (command === "flipY") updateLayer(layer.id, { scaleY: -(layer.scaleY || 1) });
     if (command === "skew") updateLayer(layer.id, { skewX: (layer.skewX || 0) + 12 });
-    if (command === "perspective") { setTransformMode("perspective"); updateLayer(layer.id, { perspective: 700, perspectivePoints: layer.perspectivePoints || [{x:0,y:0},{x:100,y:0},{x:100,y:100},{x:0,y:100}] }); }
+    if (command === "perspective") { setTransformMode("perspective"); setPerspective3d(layer.perspective3d || { x:0, y:0, z:700, rotateX:0, rotateY:0, rotateZ:0 }); updateLayer(layer.id, { perspective: 700, perspective3d: layer.perspective3d || { x:0, y:0, z:700, rotateX:0, rotateY:0, rotateZ:0 }, perspectivePoints: layer.perspectivePoints || [{x:0,y:0},{x:100,y:0},{x:100,y:100},{x:0,y:100}] }); }
     if (command === "skew") setTransformMode("skew");
     record(`${command} ${layer.name}`);
     setTransformMenu(null);
@@ -2364,6 +2366,7 @@ function DesignEditor({ notify }) {
   const resetPerspective = (layer) => {
     if (!layer) return;
     updateLayer(layer.id, { perspective: 0, perspectivePoints: undefined });
+    setPerspective3d({ x:0, y:0, z:700, rotateX:0, rotateY:0, rotateZ:0 });
     setTransformMode("normal");
     record(`Reset perspective ${layer.name}`);
   };
@@ -2375,8 +2378,10 @@ function DesignEditor({ notify }) {
   };
   const alignLayer = (layer, alignment) => {
     if (!layer || layer.locked) return;
-    const amount = layer.type === "shape" ? Math.max(100, (layer.size || 120) * 1.8) : layer.type === "text" ? 260 : 180;
-    const changes = { left:{x:-amount}, center:{x:0}, right:{x:amount}, top:{y:-amount}, middle:{y:0}, bottom:{y:amount} }[alignment];
+    const bounds = layer.type === "image" ? imageBounds : layer.type === "shape" ? { left: canvasSize.width / 2 - (layer.size || 120) / 2, top: canvasSize.height / 2 - (layer.size || 120) / 2, width: layer.size || 120, height: layer.size || 120 } : { left: canvasSize.width * .08, top: 55, width: canvasSize.width * .84, height: Math.max(42, (layer.size || 54) * 1.25) };
+    const targetX = alignment === "left" ? -bounds.left : alignment === "right" ? canvasSize.width - bounds.left - bounds.width : alignment === "center" ? canvasSize.width / 2 - (bounds.left + bounds.width / 2) : layer.x || 0;
+    const targetY = alignment === "top" ? -bounds.top : alignment === "bottom" ? canvasSize.height - bounds.top - bounds.height : alignment === "middle" ? canvasSize.height / 2 - (bounds.top + bounds.height / 2) : layer.y || 0;
+    const changes = ["left","right","center"].includes(alignment) ? { x: targetX } : { y: targetY };
     updateLayer(layer.id, changes);
     record(`Aligned ${layer.name} ${alignment}`);
   };
@@ -3324,6 +3329,7 @@ function DesignEditor({ notify }) {
               <strong>{selected.name}</strong>
               {selected.type !== "background" && <div className="alignment-properties"><p className="eyebrow">ALIGNMENT</p><div className="alignment-grid"><button title="Align left" onClick={()=>alignLayer(selected,"left")}><AlignHorizontalJustifyStart size={14}/><small>Left</small></button><button title="Align center" onClick={()=>alignLayer(selected,"center")}><AlignHorizontalJustifyCenter size={14}/><small>Center</small></button><button title="Align right" onClick={()=>alignLayer(selected,"right")}><AlignHorizontalJustifyEnd size={14}/><small>Right</small></button><button title="Align top" onClick={()=>alignLayer(selected,"top")}><AlignVerticalJustifyStart size={14}/><small>Top</small></button><button title="Align middle" onClick={()=>alignLayer(selected,"middle")}><AlignVerticalJustifyCenter size={14}/><small>Middle</small></button><button title="Align bottom" onClick={()=>alignLayer(selected,"bottom")}><AlignVerticalJustifyEnd size={14}/><small>Bottom</small></button></div></div>}
               {selected.type !== "background" && <div className="transform-properties"><p className="eyebrow">TRANSFORM</p><div className="transform-grid"><label>X<input type="number" value={Math.round(selected.x || 0)} onChange={(e)=>updateLayer(selected.id,{x:Number(e.target.value)})}/></label><label>Y<input type="number" value={Math.round(selected.y || 0)} onChange={(e)=>updateLayer(selected.id,{y:Number(e.target.value)})}/></label><label>Scale X<input type="number" step="0.01" value={Number(selected.scaleX || 1).toFixed(2)} onChange={(e)=>updateLayer(selected.id,{scaleX:Number(e.target.value) || 0.05})}/></label><label>Scale Y<input type="number" step="0.01" value={Number(selected.scaleY || 1).toFixed(2)} onChange={(e)=>updateLayer(selected.id,{scaleY:Number(e.target.value) || 0.05})}/></label><label>Rotation<input type="number" value={Math.round(selected.rotation || 0)} onChange={(e)=>updateLayer(selected.id,{rotation:Number(e.target.value)})}/></label><label>Perspective<input type="number" min="0" value={Math.round(selected.perspective || 0)} onChange={(e)=>updateLayer(selected.id,{perspective:Number(e.target.value)})}/></label><label>Skew X<input type="number" value={Math.round(selected.skewX || 0)} onChange={(e)=>updateLayer(selected.id,{skewX:Number(e.target.value)})}/></label><label>Skew Y<input type="number" value={Math.round(selected.skewY || 0)} onChange={(e)=>updateLayer(selected.id,{skewY:Number(e.target.value)})}/></label></div><hr/><div className="transform-property-actions"><button onClick={()=>applyTransformCommand("flipX",selected)}>Flip H</button><button onClick={()=>applyTransformCommand("flipY",selected)}>Flip V</button></div>{selected.perspectivePoints && <button className="reset-perspective" onClick={()=>resetPerspective(selected)}>Reset perspective</button>}</div>}
+              {transformMode === "perspective" && selected.type !== "background" && <div className="perspective-3d-properties"><p className="eyebrow">PERSPECTIVE 3D</p><div className="transform-grid"><label>Position X<input type="number" value={perspective3d.x} onChange={(e)=>{const value={...perspective3d,x:Number(e.target.value)};setPerspective3d(value);updateLayer(selected.id,{perspective3d:value})}}/></label><label>Position Y<input type="number" value={perspective3d.y} onChange={(e)=>{const value={...perspective3d,y:Number(e.target.value)};setPerspective3d(value);updateLayer(selected.id,{perspective3d:value})}}/></label><label>Depth Z<input type="number" min="1" value={perspective3d.z} onChange={(e)=>{const value={...perspective3d,z:Number(e.target.value)};setPerspective3d(value);updateLayer(selected.id,{perspective3d:value})}}/></label><label>Rotate X<input type="number" value={perspective3d.rotateX} onChange={(e)=>{const value={...perspective3d,rotateX:Number(e.target.value)};setPerspective3d(value);updateLayer(selected.id,{perspective3d:value})}}/></label><label>Rotate Y<input type="number" value={perspective3d.rotateY} onChange={(e)=>{const value={...perspective3d,rotateY:Number(e.target.value)};setPerspective3d(value);updateLayer(selected.id,{perspective3d:value})}}/></label><label>Rotate Z<input type="number" value={perspective3d.rotateZ} onChange={(e)=>{const value={...perspective3d,rotateZ:Number(e.target.value)};setPerspective3d(value);updateLayer(selected.id,{perspective3d:value})}}/></label></div><button className="reset-perspective" onClick={()=>resetPerspective(selected)}><RotateCcw size={12}/> Reset perspective</button></div>}
               {selected.type !== "background" && <div className="inspector-action-row"><button className={`scale-link ${scaleLinked ? "active" : ""}`} title="Link scale X and Y" onClick={()=>setScaleLinked(!scaleLinked)}><Link2 size={12}/> Scale values linked</button><button title="Reset skew" onClick={()=>resetSkew(selected)}><RotateCcw size={12}/> Reset skew</button></div>}
               {selected.type === "text" && (
                 <>
