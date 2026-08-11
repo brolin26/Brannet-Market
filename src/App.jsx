@@ -2163,6 +2163,7 @@ function SettingsPanel({ user }) {
 
 function DesignEditor({ notify }) {
   const [imageUrl, setImageUrl] = useState("");
+  const [imageDimensions, setImageDimensions] = useState(null);
   const [fileName, setFileName] = useState("Untitled design");
   const [activeTool, setActiveTool] = useState("Upload");
   const [zoom, setZoom] = useState(65);
@@ -2216,10 +2217,10 @@ function DesignEditor({ notify }) {
     const a = layer.adjustments || adjustments;
     return `brightness(${a.brightness}%) contrast(${a.contrast}%) saturate(${a.saturation}%) blur(${a.blur}px) grayscale(${a.grayscale}%)`;
   };
-  const snapshot = () => ({ layers, adjustments, background, imageUrl, canvasSize, strokes, fileName, history, stagePan });
+  const snapshot = () => ({ layers, adjustments, background, imageUrl, imageDimensions, canvasSize, strokes, fileName, history, stagePan });
   const restore = (state) => {
     setLayers(state.layers); setAdjustments(state.adjustments); setBackground(state.background);
-    setImageUrl(state.imageUrl || ""); setCanvasSize(state.canvasSize); setStrokes(state.strokes || []);
+    setImageUrl(state.imageUrl || ""); setImageDimensions(state.imageDimensions || null); setCanvasSize(state.canvasSize); setStrokes(state.strokes || []);
     setFileName(state.fileName || "Untitled design"); setHistory(state.history || ["Opened project"]); setStagePan(state.stagePan || {x:0,y:0});
   };
   const record = (action) => {
@@ -2247,6 +2248,9 @@ function DesignEditor({ notify }) {
     const reader = new FileReader();
     reader.onload = () => {
       const url = String(reader.result);
+      const probe = new Image();
+      probe.onload = () => setImageDimensions({ width: probe.naturalWidth, height: probe.naturalHeight });
+      probe.src = url;
       const id=`image-${Date.now()}`;
       setImageUrl(url);
       setLayers((current) => [{ id, name:file.name, type:"image", visible:true, locked:false, x:0, y:0, src:url }, ...current]);
@@ -2301,6 +2305,13 @@ function DesignEditor({ notify }) {
     return `${perspective} translate(${layer.x || 0}px,${layer.y || 0}px) rotate(${layer.rotation || 0}deg) skew(${layer.skewX || 0}deg,${layer.skewY || 0}deg) scale(${layer.scaleX || 1},${layer.scaleY || 1})`;
   };
   const layerPerspectiveStyle = () => ({});
+  const imageBounds = (() => {
+    const aspect = imageDimensions?.width && imageDimensions?.height ? imageDimensions.width / imageDimensions.height : canvasSize.width / canvasSize.height;
+    let width = canvasSize.width;
+    let height = width / aspect;
+    if (height > canvasSize.height) { height = canvasSize.height; width = height * aspect; }
+    return { left: (canvasSize.width - width) / 2, top: (canvasSize.height - height) / 2, width, height };
+  })();
   const beginTransform = (e, type, layer) => {
     if (!layer || layer.locked) return;
     e.preventDefault();
@@ -2672,7 +2683,7 @@ function DesignEditor({ notify }) {
   const templateLibrary = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, name: `Creative layout ${i + 1}`, bg: ["#f5df4d","#6c51f4","#ff694f","#84d6c3","#111111"][i % 5], accent: ["#111111","#ffffff","#f5df4d"][i % 3] }));
   const textLibrary = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, text: ["MAKE IT BOLD","New perspectives","Less, but better","Creative direction","Ideas in motion"][i % 5], size: [34,44,54,64,76][i % 5] }));
   const shapeLibrary = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, shape: ["square","circle","star","triangle","diamond"][i % 5] }));
-  const placePhoto = (photo) => { record("Placed stock photo"); setImageUrl(photo.url); setFileName(photo.name); setLayers((all) => [{ id: `image-${Date.now()}`, name: photo.name, type: "image", visible: true, locked: false, x: 0, y: 0, src: photo.url }, ...all]); };
+  const placePhoto = (photo) => { record("Placed stock photo"); setImageUrl(photo.url); setFileName(photo.name); const probe=new Image(); probe.onload=()=>setImageDimensions({width:probe.naturalWidth,height:probe.naturalHeight}); probe.src=photo.url; setLayers((all) => [{ id: `image-${Date.now()}`, name: photo.name, type: "image", visible: true, locked: false, x: 0, y: 0, src: photo.url }, ...all]); };
   const applyTemplate = (template) => { record(`Applied ${template.name}`); setBackground(template.bg); const now=Date.now(); setLayers([{ id:`text-${now}`, name:"Template headline", type:"text", visible:true, locked:false, text:template.name, color:template.accent, size:64, x:0, y:-80, fillType:"solid", gradientColor:"#ffffff", strokeColor:"#000000", strokeGradient:"#ff694f", strokeWidth:0 }, { id:`shape-${now}`, name:"Accent shape", type:"shape", shape:"circle", visible:true, locked:false, color:template.accent, x:180, y:100, size:120 }, { id:"background", name:"Background", type:"background", visible:true, locked:true }]); };
   const addTextPreset = (preset) => { addText(); setTimeout(() => setLayers((all) => all.map((layer, i) => i === 0 ? {...layer, text:preset.text, name:preset.text, size:preset.size} : layer)), 0); };
   const addShape = (shape) => { const id=`shape-${Date.now()}`; record(`Added ${shape.shape}`); setLayers((all) => [{id,name:shape.shape,type:"shape",shape:shape.shape,visible:true,locked:false,color:drawSettings.color,size:140,x:0,y:0},...all]); setSelectedLayer(id); };
@@ -3275,7 +3286,7 @@ function DesignEditor({ notify }) {
                     </div>
                   ) : layer.visible && layer.type === "shape" ? <div key={layer.id} className={`canvas-shape ${layer.shape}`} style={{'--shape-color':layer.color,width:layer.size,height:layer.size,transform:layerTransform(layer),...layerPerspectiveStyle(layer)}} onPointerDown={(e)=>beginCanvasAction(e,layer)} onClick={()=>setSelectedLayer(layer.id)} onContextMenu={(e)=>{e.preventDefault();setSelectedLayer(layer.id);setTransformMenu({x:e.clientX,y:e.clientY,layerId:layer.id})}}>{layer.shape === "star" && <Star size={layer.size} fill={layer.color}/>}</div> : null,
                 )}
-              {selected && selected.type !== "background" && selected.visible && <div className={`transform-box transform-${selected.type} mode-${transformMode}`} style={selected.type === "image" ? { left:0, top:0, width:"100%", height:"100%", transform: layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) } : selected.type === "text" ? { left:"8%", top:55, width:"84%", height:Math.max(42,(selected.size || 54) * 1.25), transform:layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) } : { left:"50%", top:"50%", width:selected.size || 120, height:selected.size || 120, marginLeft:-(selected.size || 120)/2, marginTop:-(selected.size || 120)/2, transform:layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) }}>
+              {selected && selected.type !== "background" && selected.visible && <div className={`transform-box transform-${selected.type} mode-${transformMode}`} style={selected.type === "image" ? { left:imageBounds.left, top:imageBounds.top, width:imageBounds.width, height:imageBounds.height, transform: layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) } : selected.type === "text" ? { left:"8%", top:55, width:"84%", height:Math.max(42,(selected.size || 54) * 1.25), transform:layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) } : { left:"50%", top:"50%", width:selected.size || 120, height:selected.size || 120, marginLeft:-(selected.size || 120)/2, marginTop:-(selected.size || 120)/2, transform:layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) }}>
                 <span className="transform-outline" />
                 <button data-corner="0" className="transform-handle handle-nw" aria-label="Transform layer corner" onPointerDown={(e)=>beginTransform(e,transformMode === "perspective" ? "perspective-corner" : "scale-uniform",selected)} />
                 <button data-corner="1" className="transform-handle handle-ne" aria-label="Transform layer corner" onPointerDown={(e)=>beginTransform(e,transformMode === "perspective" ? "perspective-corner" : "scale-uniform",selected)} />
