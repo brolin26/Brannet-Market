@@ -2294,11 +2294,31 @@ function DesignEditor({ notify }) {
       return;
     }
     if (activeTool === "Move" && layer && !layer.locked) {
-      e.stopPropagation(); e.currentTarget.setPointerCapture?.(e.pointerId); setSelectedLayer(layer.id); record(`Moved ${layer.name}`);
-      dragRef.current = { type: "move", id: layer.id, startX: e.clientX, startY: e.clientY, x: layer.x || 0, y: layer.y || 0 };
-      window.addEventListener("pointermove", moveCanvasAction);
-      window.addEventListener("pointerup", endCanvasAction);
-      pointerTrackingRef.current = true;
+      e.preventDefault();
+      e.stopPropagation();
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+      setSelectedLayer(layer.id);
+      record(`Moved ${layer.name}`);
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const startLayerX = layer.x || 0;
+      const startLayerY = layer.y || 0;
+      const moveLayer = (event) => {
+        const scale = Math.max(0.01, zoom / 100);
+        setLayers((current) => current.map((item) => item.id === layer.id
+          ? { ...item, x: startLayerX + (event.clientX - startX) / scale, y: startLayerY + (event.clientY - startY) / scale }
+          : item));
+      };
+      const finishLayer = () => {
+        window.removeEventListener("pointermove", moveLayer);
+        window.removeEventListener("pointerup", finishLayer);
+        window.removeEventListener("pointercancel", finishLayer);
+        dragRef.current = null;
+      };
+      dragRef.current = { type: "move", id: layer.id };
+      window.addEventListener("pointermove", moveLayer);
+      window.addEventListener("pointerup", finishLayer);
+      window.addEventListener("pointercancel", finishLayer);
       return;
     }
     if (["Pen", "Brush", "Eraser"].includes(activeTool)) {
@@ -2314,14 +2334,13 @@ function DesignEditor({ notify }) {
   const moveCanvasAction = (e) => {
     if (dragRef.current?.type === "hand") {
       setStagePan({ x: dragRef.current.pan.x + e.clientX - dragRef.current.startX, y: dragRef.current.pan.y + e.clientY - dragRef.current.startY });
-    } else if (dragRef.current?.type === "move") {
-      updateLayer(dragRef.current.id, { x: dragRef.current.x + (e.clientX - dragRef.current.startX) / (zoom / 100), y: dragRef.current.y + (e.clientY - dragRef.current.startY) / (zoom / 100) });
     } else if (drawing) {
       const rect = e.currentTarget.querySelector(".pro-artboard")?.getBoundingClientRect();
       if (rect) setDrawing((path) => ({ ...path, points: [...path.points, { x: (e.clientX - rect.left) / (zoom / 100), y: (e.clientY - rect.top) / (zoom / 100) }] }));
     }
   };
   const endCanvasAction = () => {
+    if (dragRef.current?.type === "move") return;
     if (pointerTrackingRef.current) {
       window.removeEventListener("pointermove", moveCanvasAction);
       window.removeEventListener("pointerup", endCanvasAction);
