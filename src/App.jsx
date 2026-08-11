@@ -2168,7 +2168,7 @@ function DesignEditor({ notify }) {
   const [textBounds, setTextBounds] = useState({ left: 96, top: 55, width: 260, height: 68 });
   const [fileName, setFileName] = useState("Untitled design");
   const [activeTool, setActiveTool] = useState("Move");
-  const [panelTool, setPanelTool] = useState("Upload");
+  const [panelTool, setPanelTool] = useState("Media");
   const [zoom, setZoom] = useState(65);
   const [background, setBackground] = useState("#ffffff");
   const [adjustments, setAdjustments] = useState({
@@ -2193,7 +2193,7 @@ function DesignEditor({ notify }) {
   const [layerClipboard, setLayerClipboard] = useState(null);
   const [canvasSize, setCanvasSize] = useState({ width: 1200, height: 800 });
   const [stagePan, setStagePan] = useState({ x: 0, y: 0 });
-  const [drawSettings, setDrawSettings] = useState({ color: "#111111", size: 18, pressure: 70, mode: "freehand" });
+  const [drawSettings, setDrawSettings] = useState({ color: "#111111", size: 18, pressure: 70, softness: 70, shape: "circle", mode: "freehand" });
   const [strokes, setStrokes] = useState([]);
   const [drawing, setDrawing] = useState(null);
   const [assetSearch, setAssetSearch] = useState("");
@@ -2205,6 +2205,7 @@ function DesignEditor({ notify }) {
   const [showSaveAs, setShowSaveAs] = useState(false);
   const [showRulers, setShowRulers] = useState(false);
   const [transformMenu, setTransformMenu] = useState(null);
+  const [toolContextMenu, setToolContextMenu] = useState(null);
   const [transformMode, setTransformMode] = useState("normal");
   const [scaleLinked, setScaleLinked] = useState(true);
   const [perspective3d, setPerspective3d] = useState({ x: 0, y: 0, z: 700, rotateX: 0, rotateY: 0, rotateZ: 0 });
@@ -2281,7 +2282,7 @@ function DesignEditor({ notify }) {
         gradientColor: "#6c51f4",
         strokeColor: "#000000",
         strokeGradient: "#ff694f",
-        strokeWidth: 0,
+        strokeWidth: 0, fontFamily:"Manrope", fontWeight:700, fontStyle:"normal", textDecoration:"none", letterSpacing:0, lineHeight:1.1, textAlign:"center",
       },
       ...current,
     ]);
@@ -2404,6 +2405,14 @@ function DesignEditor({ notify }) {
   const beginCanvasAction = (e, layer = null) => {
     if (layer && activeTool !== "Move") return;
     const rect = e.currentTarget.closest(".pro-artboard")?.getBoundingClientRect() || e.currentTarget.getBoundingClientRect();
+    if (activeTool === "Text" && !layer) {
+      const point = { x: (e.clientX - rect.left) / (zoom / 100), y: (e.clientY - rect.top) / (zoom / 100) };
+      const id = `text-${Date.now()}`;
+      record("Added text layer");
+      setLayers((all) => [{ id, name:"Your headline", type:"text", visible:true, locked:false, text:"Your headline", color:drawSettings.color, size:54, x:point.x-canvasSize.width/2, y:point.y-55, fillType:"solid", gradientColor:"#6c51f4", strokeColor:"#000000", strokeGradient:"#ff694f", strokeWidth:0, fontFamily:"Manrope", fontWeight:700, fontStyle:"normal", textDecoration:"none", letterSpacing:0, lineHeight:1.1, textAlign:"center" }, ...all]);
+      setSelectedLayer(id);
+      return;
+    }
     if (activeTool === "Hand") {
       dragRef.current = { type: "hand", startX: e.clientX, startY: e.clientY, pan: stagePan };
       e.currentTarget.setPointerCapture?.(e.pointerId);
@@ -2446,7 +2455,7 @@ function DesignEditor({ notify }) {
         record("Erased brush stroke");
         setStrokes((all) => all.filter((path) => !path.points.some((p) => Math.hypot(p.x-point.x,p.y-point.y) < Math.max(12,drawSettings.size)))); return;
       }
-      record(activeTool === "Pen" ? "Drew pen path" : "Painted brush stroke");
+      record(activeTool === "Pen" ? "Drew vector path" : "Painted brush stroke");
       setDrawing({ id: `stroke-${Date.now()}`, tool: activeTool, color: drawSettings.color, width: drawSettings.size * (drawSettings.pressure / 100), points: [point] });
     }
   };
@@ -2466,7 +2475,24 @@ function DesignEditor({ notify }) {
       pointerTrackingRef.current = false;
     }
     dragRef.current = null;
-    if (drawing) { setStrokes((all) => [...all, drawing]); setDrawing(null); }
+    if (drawing) {
+      if (drawing.tool === "Pen" && drawing.points.length > 1) {
+        const id = `path-${Date.now()}`;
+        setLayers((all) => [{ id, name:"Pen path", type:"path", visible:true, locked:false, color:drawing.color, width:drawing.width, points:drawing.points, closed:false, x:0, y:0 }, ...all]);
+        setSelectedLayer(id);
+      } else setStrokes((all) => [...all, drawing]);
+      setDrawing(null);
+    }
+  };
+  const openToolMenu = (e, layer = null) => {
+    e.preventDefault(); e.stopPropagation();
+    if (layer) setSelectedLayer(layer.id);
+    setToolContextMenu({ x:e.clientX, y:e.clientY, tool:activeTool, layerId:layer?.id || selectedLayer });
+  };
+  const applyFill = () => {
+    const target = layers.find((x)=>x.id===selectedLayer);
+    if (target && target.type !== "background") updateLayer(target.id,{color:drawSettings.color}); else setBackground(drawSettings.color);
+    record("Filled selected layer"); setToolContextMenu(null);
   };
   const removeLayer = () => {
     const layer = layers.find((x) => x.id === selectedLayer);
@@ -2676,11 +2702,8 @@ function DesignEditor({ notify }) {
     ["Photos", ImageIcon],
     ["AI Image", Wand2],
     ["Media", ImageIcon],
-    ["Upload", Upload],
     ["Templates", Grid2X2],
-    ["Text", Type],
     ["Elements", Shapes],
-    ["Draw", Brush],
     ["Background", Palette],
     ["Resize", Crop],
   ];
@@ -3231,7 +3254,7 @@ function DesignEditor({ notify }) {
           <div className="document-tabs">
             {documents.map((doc)=><button key={doc.id} className={doc.id === (activeDocumentId || documents[0]?.id) ? "active" : ""} onClick={()=>switchDocument(doc.id)}><span>{doc.name}.mti{doc.dirty ? " •" : ""}</span><i onClick={(e)=>{e.stopPropagation();requestCloseDocument(doc)}}><X size={13}/></i></button>)}
           </div>
-          <div className={`pro-artboard-wrap tool-${activeTool.toLowerCase()} ${showRulers ? "with-rulers" : ""}`} onPointerMove={moveCanvasAction} onPointerUp={endCanvasAction} onPointerLeave={endCanvasAction} onPointerDown={(e)=>{if(!e.target.closest(".transform-box")&&!e.target.closest(".canvas-text")&&!e.target.closest(".canvas-shape")&&!e.target.closest("img"))setTransformMode("normal");beginCanvasAction(e)}}>
+          <div className={`pro-artboard-wrap tool-${activeTool.toLowerCase()} ${showRulers ? "with-rulers" : ""}`} onContextMenu={(e)=>openToolMenu(e)} onPointerMove={moveCanvasAction} onPointerUp={endCanvasAction} onPointerLeave={endCanvasAction} onPointerDown={(e)=>{if(!e.target.closest(".transform-box")&&!e.target.closest(".canvas-text")&&!e.target.closest(".canvas-shape")&&!e.target.closest("img")&&!e.target.closest("svg"))setTransformMode("normal");beginCanvasAction(e)}}>
             {showRulers && <><div className="canvas-ruler ruler-horizontal">{Array.from({length:21},(_,i)=><span key={i} style={{left:`${i*5}%`}}>{i*100}</span>)}</div><div className="canvas-ruler ruler-vertical">{Array.from({length:21},(_,i)=><span key={i} style={{top:`${i*5}%`}}>{i*100}</span>)}</div></>}
             <div
               className="pro-artboard"
@@ -3248,7 +3271,7 @@ function DesignEditor({ notify }) {
                       src={layer.src || imageUrl}
                       style={{ filter: layerFilter(layer), transform: layerTransform(layer), ...layerPerspectiveStyle(layer) }}
                       onClick={() => setSelectedLayer(layer.id)}
-                      onContextMenu={(e)=>{e.preventDefault();setSelectedLayer(layer.id);setTransformMenu({x:e.clientX,y:e.clientY,layerId:layer.id})}}
+                      onContextMenu={(e)=>activeTool === "Move" ? (e.preventDefault(),setSelectedLayer(layer.id),setTransformMenu({x:e.clientX,y:e.clientY,layerId:layer.id})) : openToolMenu(e,layer)}
                       onPointerDown={(e)=>beginCanvasAction(e,layer)}
                     />
                   ) : layer.visible && layer.type === "text" ? (
@@ -3256,9 +3279,9 @@ function DesignEditor({ notify }) {
                       key={layer.id}
                       className={`canvas-text ${selectedLayer === layer.id ? "selected" : ""}`}
                       ref={(node)=>{if(node && layer.id === selectedLayer){const next={left:node.offsetLeft,top:node.offsetTop,width:node.offsetWidth,height:node.offsetHeight};if(next.width!==textBounds.width||next.height!==textBounds.height||next.left!==textBounds.left||next.top!==textBounds.top)setTextBounds(next)}}}
-                      style={{ color: layer.fillType === "gradient" ? "transparent" : layer.color, backgroundImage: layer.fillType === "gradient" ? `linear-gradient(90deg,${layer.color},${layer.gradientColor})` : "none", backgroundClip: layer.fillType === "gradient" ? "text" : "border-box", WebkitBackgroundClip: layer.fillType === "gradient" ? "text" : "border-box", WebkitTextStroke:`${layer.strokeWidth||0}px ${layer.strokeColor||"transparent"}`, fontSize: layer.size, transform: layerTransform(layer), ...layerPerspectiveStyle(layer) }}
+                      style={{ color: layer.fillType === "gradient" ? "transparent" : layer.color, backgroundImage: layer.fillType === "gradient" ? `linear-gradient(90deg,${layer.color},${layer.gradientColor})` : "none", backgroundClip: layer.fillType === "gradient" ? "text" : "border-box", WebkitBackgroundClip: layer.fillType === "gradient" ? "text" : "border-box", WebkitTextStroke:`${layer.strokeWidth||0}px ${layer.strokeColor||"transparent"}`, fontSize: layer.size, fontFamily:layer.fontFamily || "Manrope", fontWeight:layer.fontWeight || 400, fontStyle:layer.fontStyle || "normal", textDecoration:layer.textDecoration || "none", letterSpacing:`${layer.letterSpacing || 0}px`, lineHeight:layer.lineHeight || 1.1, textAlign:layer.textAlign || "center", transform: layerTransform(layer), ...layerPerspectiveStyle(layer) }}
                       onClick={() => setSelectedLayer(layer.id)}
-                      onContextMenu={(e)=>{e.preventDefault();setSelectedLayer(layer.id);setTransformMenu({x:e.clientX,y:e.clientY,layerId:layer.id})}}
+                      onContextMenu={(e)=>activeTool === "Move" ? (e.preventDefault(),setSelectedLayer(layer.id),setTransformMenu({x:e.clientX,y:e.clientY,layerId:layer.id})) : openToolMenu(e,layer)}
                       onPointerDown={(e)=>beginCanvasAction(e,layer)}
                       contentEditable
                       suppressContentEditableWarning
@@ -3270,7 +3293,7 @@ function DesignEditor({ notify }) {
                     >
                       {layer.text}
                     </div>
-                  ) : layer.visible && layer.type === "shape" ? <div key={layer.id} className={`canvas-shape ${layer.shape}`} style={{'--shape-color':layer.color,width:layer.size,height:layer.size,transform:layerTransform(layer),...layerPerspectiveStyle(layer)}} onPointerDown={(e)=>beginCanvasAction(e,layer)} onClick={()=>setSelectedLayer(layer.id)} onContextMenu={(e)=>{e.preventDefault();setSelectedLayer(layer.id);setTransformMenu({x:e.clientX,y:e.clientY,layerId:layer.id})}}>{layer.shape === "star" && <Star size={layer.size} fill={layer.color}/>}</div> : null,
+                ) : layer.visible && layer.type === "shape" ? <div key={layer.id} className={`canvas-shape ${layer.shape}`} style={{'--shape-color':layer.color,width:layer.size,height:layer.size,transform:layerTransform(layer),...layerPerspectiveStyle(layer)}} onPointerDown={(e)=>beginCanvasAction(e,layer)} onClick={()=>setSelectedLayer(layer.id)} onContextMenu={(e)=>activeTool === "Move" ? (e.preventDefault(),setSelectedLayer(layer.id),setTransformMenu({x:e.clientX,y:e.clientY,layerId:layer.id})) : openToolMenu(e,layer)}>{layer.shape === "star" && <Star size={layer.size} fill={layer.color}/>}</div> : layer.visible && layer.type === "path" ? <svg key={layer.id} className="vector-path-layer" style={{transform:layerTransform(layer)}} onPointerDown={(e)=>beginCanvasAction(e,layer)} onClick={()=>setSelectedLayer(layer.id)}><polyline points={layer.points.map((p)=>`${p.x},${p.y}`).join(" ")} fill={layer.closed?layer.color:"none"} stroke={layer.color} strokeWidth={layer.width} strokeLinecap="round" strokeLinejoin="round"/></svg> : null,
                 )}
               {selected && selected.type !== "background" && selected.visible && <div className={`transform-box transform-${selected.type} mode-${transformMode}`} style={selected.type === "image" ? { left:imageBounds.left, top:imageBounds.top, width:imageBounds.width, height:imageBounds.height, transform: layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) } : selected.type === "text" ? { left:textBounds.left, top:textBounds.top, width:textBounds.width, height:textBounds.height, transform:layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) } : { left:"50%", top:"50%", width:selected.size || 120, height:selected.size || 120, marginLeft:-(selected.size || 120)/2, marginTop:-(selected.size || 120)/2, transform:layerTransform(selected), "--ui-inverse-scale": 1 / Math.max(Math.abs(selected.scaleX || 1), Math.abs(selected.scaleY || 1)) }}>
                 <span className="transform-outline" />
@@ -3287,7 +3310,7 @@ function DesignEditor({ notify }) {
               <svg className="drawing-layer" viewBox={`0 0 ${canvasSize.width} ${canvasSize.height}`}><g>{[...strokes,...(drawing?[drawing]:[])].map(path=><polyline key={path.id} points={path.points.map(p=>`${p.x},${p.y}`).join(" ")} fill="none" stroke={path.color} strokeWidth={path.width} strokeLinecap="round" strokeLinejoin="round"/>)}</g></svg>
             </div>
           </div>
-          <div className="quick-tool-dock">{[["Move",Move],["Hand",Hand],["Pen",PenTool],["Brush",Brush],["Eraser",Eraser],["Fill",PaintBucket]].map(([name,Icon])=><button key={name} className={activeTool===name?"active":""} onClick={()=>{setActiveTool(name);if(name==="Fill"){record("Filled selected layer");selected?.type==="background"?setBackground(drawSettings.color):selected&&updateLayer(selected.id,{color:drawSettings.color})}}} title={`${name} Tool`}><Icon size={18}/><span>{name}</span></button>)}</div>
+          <div className="quick-tool-dock">{[["Move",Move],["Hand",Hand],["Pen",PenTool],["Brush",Brush],["Eraser",Eraser],["Fill",PaintBucket],["Text",Type]].map(([name,Icon])=><button key={name} className={activeTool===name?"active":""} onClick={()=>{setActiveTool(name);if(name==="Fill"){record("Filled selected layer");selected?.type==="background"?setBackground(drawSettings.color):selected&&updateLayer(selected.id,{color:drawSettings.color})}}} title={`${name} Tool`}><Icon size={18}/><span>{name}</span></button>)}</div>
           <div className="zoom-control">
             <button onClick={() => setZoom((z) => Math.max(10, z - 10))}>
               <Minus size={14} />
@@ -3309,7 +3332,7 @@ function DesignEditor({ notify }) {
               <div className="selected-layer-thumb">{selected.type === "image" && (selected.src || imageUrl) ? <img src={selected.src || imageUrl} alt=""/> : selected.type === "text" ? <Type size={18}/> : <Shapes size={18}/>}<span>{selected.name}</span></div>
               <strong>{selected.name}</strong>
               {selected.type !== "background" && <div className="alignment-properties"><p className="eyebrow">ALIGNMENT</p><div className="alignment-grid"><button title="Align left" onClick={()=>alignLayer(selected,"left")}><AlignHorizontalJustifyStart size={14}/><small>Left</small></button><button title="Align center" onClick={()=>alignLayer(selected,"center")}><AlignHorizontalJustifyCenter size={14}/><small>Center</small></button><button title="Align right" onClick={()=>alignLayer(selected,"right")}><AlignHorizontalJustifyEnd size={14}/><small>Right</small></button><button title="Align top" onClick={()=>alignLayer(selected,"top")}><AlignVerticalJustifyStart size={14}/><small>Top</small></button><button title="Align middle" onClick={()=>alignLayer(selected,"middle")}><AlignVerticalJustifyCenter size={14}/><small>Middle</small></button><button title="Align bottom" onClick={()=>alignLayer(selected,"bottom")}><AlignVerticalJustifyEnd size={14}/><small>Bottom</small></button></div></div>}
-              {selected.type !== "background" && <div className="transform-properties"><p className="eyebrow">TRANSFORM</p><div className="transform-grid"><label>X<input type="number" value={Math.round(selected.x || 0)} onChange={(e)=>updateLayer(selected.id,{x:Number(e.target.value)})}/></label><label>Y<input type="number" value={Math.round(selected.y || 0)} onChange={(e)=>updateLayer(selected.id,{y:Number(e.target.value)})}/></label><label>Scale X<input type="number" step="0.01" value={Number(selected.scaleX || 1).toFixed(2)} onChange={(e)=>updateLayer(selected.id,{scaleX:Number(e.target.value) || 0.05})}/></label><label>Scale Y<input type="number" step="0.01" value={Number(selected.scaleY || 1).toFixed(2)} onChange={(e)=>updateLayer(selected.id,{scaleY:Number(e.target.value) || 0.05})}/></label><label>Rotation<input type="number" value={Math.round(selected.rotation || 0)} onChange={(e)=>updateLayer(selected.id,{rotation:Number(e.target.value)})}/></label><label>Perspective<input type="number" min="0" value={Math.round(selected.perspective || 0)} onChange={(e)=>updateLayer(selected.id,{perspective:Number(e.target.value)})}/></label><label>Skew X<input type="number" value={Math.round(selected.skewX || 0)} onChange={(e)=>updateLayer(selected.id,{skewX:Number(e.target.value)})}/></label><label>Skew Y<input type="number" value={Math.round(selected.skewY || 0)} onChange={(e)=>updateLayer(selected.id,{skewY:Number(e.target.value)})}/></label></div><hr/><div className="transform-property-actions"><button onClick={()=>applyTransformCommand("flipX",selected)}>Flip H</button><button onClick={()=>applyTransformCommand("flipY",selected)}>Flip V</button></div>{selected.perspectivePoints && <button className="reset-perspective" onClick={()=>resetPerspective(selected)}>Reset perspective</button>}</div>}
+              {selected.type !== "background" && <div className="transform-properties"><p className="eyebrow">TRANSFORM</p><div className="transform-grid"><label>X<input type="number" value={Math.round(selected.x || 0)} onChange={(e)=>updateLayer(selected.id,{x:Number(e.target.value)})}/></label><label>Y<input type="number" value={Math.round(selected.y || 0)} onChange={(e)=>updateLayer(selected.id,{y:Number(e.target.value)})}/></label><label>Scale X<input type="number" step="0.01" value={Number(selected.scaleX || 1).toFixed(2)} onChange={(e)=>updateLayer(selected.id,{scaleX:Number(e.target.value) || 0.05})}/></label><label>Scale Y<input type="number" step="0.01" value={Number(selected.scaleY || 1).toFixed(2)} onChange={(e)=>updateLayer(selected.id,{scaleY:Number(e.target.value) || 0.05})}/></label><label>Rotation<input type="number" value={Math.round(selected.rotation || 0)} onChange={(e)=>updateLayer(selected.id,{rotation:Number(e.target.value)})}/></label><label>Skew X<input type="number" value={Math.round(selected.skewX || 0)} onChange={(e)=>updateLayer(selected.id,{skewX:Number(e.target.value)})}/></label><label>Skew Y<input type="number" value={Math.round(selected.skewY || 0)} onChange={(e)=>updateLayer(selected.id,{skewY:Number(e.target.value)})}/></label></div><hr/><div className="transform-property-actions"><button onClick={()=>applyTransformCommand("flipX",selected)}>Flip H</button><button onClick={()=>applyTransformCommand("flipY",selected)}>Flip V</button></div>{selected.perspectivePoints && <button className="reset-perspective" onClick={()=>resetPerspective(selected)}>Reset perspective</button>}</div>}
               {transformMode === "perspective" && selected.type !== "background" && <div className="perspective-3d-properties"><p className="eyebrow">PERSPECTIVE 3D</p><div className="transform-grid"><label>Position X<input type="number" value={perspective3d.x} onChange={(e)=>{const value={...perspective3d,x:Number(e.target.value)};setPerspective3d(value);updateLayer(selected.id,{perspective3d:value})}}/></label><label>Position Y<input type="number" value={perspective3d.y} onChange={(e)=>{const value={...perspective3d,y:Number(e.target.value)};setPerspective3d(value);updateLayer(selected.id,{perspective3d:value})}}/></label><label>Depth Z<input type="number" min="1" value={perspective3d.z} onChange={(e)=>{const value={...perspective3d,z:Number(e.target.value)};setPerspective3d(value);updateLayer(selected.id,{perspective3d:value})}}/></label><label>Rotate X<input type="number" value={perspective3d.rotateX} onChange={(e)=>{const value={...perspective3d,rotateX:Number(e.target.value)};setPerspective3d(value);updateLayer(selected.id,{perspective3d:value})}}/></label><label>Rotate Y<input type="number" value={perspective3d.rotateY} onChange={(e)=>{const value={...perspective3d,rotateY:Number(e.target.value)};setPerspective3d(value);updateLayer(selected.id,{perspective3d:value})}}/></label><label>Rotate Z<input type="number" value={perspective3d.rotateZ} onChange={(e)=>{const value={...perspective3d,rotateZ:Number(e.target.value)};setPerspective3d(value);updateLayer(selected.id,{perspective3d:value})}}/></label></div><button className="reset-perspective" onClick={()=>resetPerspective(selected)}><RotateCcw size={12}/> Reset perspective</button></div>}
               {selected.type !== "background" && <div className="inspector-action-row"><button className={`scale-link ${scaleLinked ? "active" : ""}`} title="Link scale X and Y" onClick={()=>setScaleLinked(!scaleLinked)}><Link2 size={12}/> Scale values linked</button><button title="Reset skew" onClick={()=>resetSkew(selected)}><RotateCcw size={12}/> Reset skew</button></div>}
               {selected.type === "text" && (
@@ -3335,6 +3358,12 @@ function DesignEditor({ notify }) {
                       }
                     />
                   </label>
+                  <label>Font<select value={selected.fontFamily || "Manrope"} onChange={(e)=>updateLayer(selected.id,{fontFamily:e.target.value})}><option>Manrope</option><option>Arial</option><option>Georgia</option><option>Impact</option></select></label>
+                  <label>Style<select value={`${selected.fontWeight||400}-${selected.fontStyle||"normal"}`} onChange={(e)=>{const [w,s]=e.target.value.split("-");updateLayer(selected.id,{fontWeight:Number(w),fontStyle:s})}}><option value="400-normal">Regular</option><option value="700-normal">Bold</option><option value="400-italic">Italic</option><option value="700-italic">Bold italic</option></select></label>
+                  <label>Letter spacing<input type="number" value={selected.letterSpacing || 0} onChange={(e)=>updateLayer(selected.id,{letterSpacing:Number(e.target.value)})}/></label>
+                  <label>Line spacing<input type="number" step="0.1" value={selected.lineHeight || 1.1} onChange={(e)=>updateLayer(selected.id,{lineHeight:Number(e.target.value)})}/></label>
+                  <label>Paragraph align<select value={selected.textAlign || "center"} onChange={(e)=>updateLayer(selected.id,{textAlign:e.target.value})}><option>left</option><option>center</option><option>right</option></select></label>
+                  <div className="inspector-action-row"><button onClick={()=>updateLayer(selected.id,{fontWeight:selected.fontWeight===700?400:700})}>Bold</button><button onClick={()=>updateLayer(selected.id,{fontStyle:selected.fontStyle==="italic"?"normal":"italic"})}>Italic</button><button onClick={()=>updateLayer(selected.id,{textDecoration:selected.textDecoration==="underline"?"none":"underline"})}>Underline</button></div>
                   <label>
                     Fill color
                     <input
@@ -3434,6 +3463,7 @@ function DesignEditor({ notify }) {
       {showSaveAs && <div className="editor-dialog-backdrop"><div className="editor-modal save-as-dialog"><header><strong>Save project as image</strong><button onClick={()=>setShowSaveAs(false)}><X size={16}/></button></header><p>Select an image format for the current canvas.</p><div className="format-options"><button onClick={()=>{exportImage("image/jpeg","jpg");setShowSaveAs(false)}}><b>JPG</b><span>Small, widely compatible</span></button><button onClick={()=>{exportImage("image/webp","webp");setShowSaveAs(false)}}><b>WebP</b><span>Modern web image</span></button><button onClick={()=>{exportImage("image/avif","avif");setShowSaveAs(false)}}><b>AVIF</b><span>High-efficiency image</span></button></div></div></div>}
       {showProjectInfo && <div className="editor-dialog-backdrop"><div className="editor-modal project-info-dialog"><header><strong>Project information</strong><button onClick={()=>setShowProjectInfo(false)}><X size={16}/></button></header><table><tbody><tr><th>Project name</th><td>{fileName}</td></tr><tr><th>Canvas size</th><td>{canvasSize.width} × {canvasSize.height} px</td></tr><tr><th>Layers</th><td>{layers.length}</td></tr><tr><th>Drawing paths</th><td>{strokes.length}</td></tr><tr><th>Status</th><td>{documents.find((doc)=>doc.id === (activeDocumentId || documents[0]?.id))?.dirty ? "Unsaved changes" : "Saved"}</td></tr><tr><th>Format</th><td>Metainspo editable project</td></tr></tbody></table><footer><button className="primary" onClick={()=>setShowProjectInfo(false)}>Done</button></footer></div></div>}
       {transformMenu && <div className="transform-context-menu" style={{left:transformMenu.x,top:transformMenu.y}} onMouseLeave={()=>setTransformMenu(null)}><strong>Transform</strong><button onClick={()=>applyTransformCommand("skew",layers.find((item)=>item.id===transformMenu.layerId))}>Skew</button><button onClick={()=>applyTransformCommand("perspective",layers.find((item)=>item.id===transformMenu.layerId))}>Perspective</button><i/><button onClick={()=>applyTransformCommand("flipX",layers.find((item)=>item.id===transformMenu.layerId))}>Flip Horizontal</button><button onClick={()=>applyTransformCommand("flipY",layers.find((item)=>item.id===transformMenu.layerId))}>Flip Vertical</button></div>}
+      {toolContextMenu && <div className="transform-context-menu tool-context-menu" style={{left:toolContextMenu.x,top:toolContextMenu.y}} onMouseLeave={()=>setToolContextMenu(null)}><strong>{toolContextMenu.tool} Tool</strong>{toolContextMenu.tool === "Hand" && <button onClick={()=>{setStagePan({x:0,y:0});setZoom(65);setToolContextMenu(null)}}>Center canvas</button>}{["Brush","Eraser","Pen"].includes(toolContextMenu.tool) && <><label>Size <input type="range" min="1" max="120" value={drawSettings.size} onChange={(e)=>setDrawSettings({...drawSettings,size:Number(e.target.value)})}/></label><label>Pressure <input type="range" min="1" max="100" value={drawSettings.pressure} onChange={(e)=>setDrawSettings({...drawSettings,pressure:Number(e.target.value)})}/></label><button onClick={()=>setDrawSettings({...drawSettings,softness:100})}>Soft brush</button><button onClick={()=>setDrawSettings({...drawSettings,softness:0})}>Hard brush</button></>}{toolContextMenu.tool === "Fill" && <button onClick={applyFill}>Fill selected layer</button>}<button onClick={()=>setToolContextMenu(null)}>Close</button></div>}
     </main>
   );
 }
