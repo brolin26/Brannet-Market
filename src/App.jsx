@@ -2196,6 +2196,7 @@ function DesignEditor({ notify }) {
   const [showRulers, setShowRulers] = useState(false);
   const [transformMenu, setTransformMenu] = useState(null);
   const [transformMode, setTransformMode] = useState("normal");
+  const [scaleLinked, setScaleLinked] = useState(true);
   const pointerTrackingRef = useRef(false);
   const transformRef = useRef(null);
   const undoStack = useRef([]);
@@ -2276,7 +2277,7 @@ function DesignEditor({ notify }) {
   const updateLayer = (id, values) =>
     setLayers((current) =>
       current.map((layer) =>
-        layer.id === id ? { ...layer, ...values } : layer,
+        layer.id === id ? { ...layer, ...values, ...(scaleLinked && id === selectedLayer && ("scaleX" in values || "scaleY" in values) ? { scaleX: values.scaleX ?? values.scaleY ?? layer.scaleX ?? 1, scaleY: values.scaleY ?? values.scaleX ?? layer.scaleY ?? 1 } : {}) } : layer,
       ),
     );
   const perspectiveMatrix = (points) => {
@@ -2349,6 +2350,20 @@ function DesignEditor({ notify }) {
     setTransformMode("normal");
     record(`Reset perspective ${layer.name}`);
   };
+  const resetSkew = (layer) => {
+    if (!layer) return;
+    updateLayer(layer.id, { skewX: 0, skewY: 0 });
+    setTransformMode("normal");
+    record(`Reset skew ${layer.name}`);
+  };
+  const alignLayer = (layer, alignment) => {
+    if (!layer || layer.locked) return;
+    const amount = layer.type === "shape" ? Math.max(100, (layer.size || 120) * 1.8) : layer.type === "text" ? 260 : 180;
+    const changes = { left:{x:-amount}, center:{x:0}, right:{x:amount}, top:{y:-amount}, middle:{y:0}, bottom:{y:amount} }[alignment];
+    updateLayer(layer.id, changes);
+    record(`Aligned ${layer.name} ${alignment}`);
+  };
+  const setScaleValue = (layer, axis, value) => updateLayer(layer.id, scaleLinked ? { scaleX:value, scaleY:value } : { [axis]:value });
   const toggleLock = (id) => {
     const layer = layers.find((x) => x.id === id);
     if (!layer || layer.type === "background") return;
@@ -3288,8 +3303,11 @@ function DesignEditor({ notify }) {
           {selected && (
             <div className="layer-properties">
               <p className="eyebrow">SELECTED LAYER</p>
+              <div className="selected-layer-thumb">{selected.type === "image" && (selected.src || imageUrl) ? <img src={selected.src || imageUrl} alt=""/> : selected.type === "text" ? <Type size={18}/> : <Shapes size={18}/>}<span>{selected.name}</span></div>
               <strong>{selected.name}</strong>
+              {selected.type !== "background" && <div className="alignment-properties"><p className="eyebrow">ALIGNMENT</p><div className="alignment-grid"><button title="Align left" onClick={()=>alignLayer(selected,"left")}><AlignCenter size={14}/><small>Left</small></button><button title="Align center" onClick={()=>alignLayer(selected,"center")}><AlignCenter size={14}/><small>Center</small></button><button title="Align right" onClick={()=>alignLayer(selected,"right")}><AlignCenter size={14}/><small>Right</small></button><button title="Align top" onClick={()=>alignLayer(selected,"top")}><AlignCenter size={14}/><small>Top</small></button><button title="Align middle" onClick={()=>alignLayer(selected,"middle")}><AlignCenter size={14}/><small>Middle</small></button><button title="Align bottom" onClick={()=>alignLayer(selected,"bottom")}><AlignCenter size={14}/><small>Bottom</small></button></div></div>}
               {selected.type !== "background" && <div className="transform-properties"><p className="eyebrow">TRANSFORM</p><div className="transform-grid"><label>X<input type="number" value={Math.round(selected.x || 0)} onChange={(e)=>updateLayer(selected.id,{x:Number(e.target.value)})}/></label><label>Y<input type="number" value={Math.round(selected.y || 0)} onChange={(e)=>updateLayer(selected.id,{y:Number(e.target.value)})}/></label><label>Scale X<input type="number" step="0.01" value={Number(selected.scaleX || 1).toFixed(2)} onChange={(e)=>updateLayer(selected.id,{scaleX:Number(e.target.value) || 0.05})}/></label><label>Scale Y<input type="number" step="0.01" value={Number(selected.scaleY || 1).toFixed(2)} onChange={(e)=>updateLayer(selected.id,{scaleY:Number(e.target.value) || 0.05})}/></label><label>Rotation<input type="number" value={Math.round(selected.rotation || 0)} onChange={(e)=>updateLayer(selected.id,{rotation:Number(e.target.value)})}/></label><label>Perspective<input type="number" min="0" value={Math.round(selected.perspective || 0)} onChange={(e)=>updateLayer(selected.id,{perspective:Number(e.target.value)})}/></label><label>Skew X<input type="number" value={Math.round(selected.skewX || 0)} onChange={(e)=>updateLayer(selected.id,{skewX:Number(e.target.value)})}/></label><label>Skew Y<input type="number" value={Math.round(selected.skewY || 0)} onChange={(e)=>updateLayer(selected.id,{skewY:Number(e.target.value)})}/></label></div><hr/><div className="transform-property-actions"><button onClick={()=>applyTransformCommand("flipX",selected)}>Flip H</button><button onClick={()=>applyTransformCommand("flipY",selected)}>Flip V</button></div>{selected.perspectivePoints && <button className="reset-perspective" onClick={()=>resetPerspective(selected)}>Reset perspective</button>}</div>}
+              {selected.type !== "background" && <div className="inspector-action-row"><button className={`scale-link ${scaleLinked ? "active" : ""}`} title="Link scale X and Y" onClick={()=>setScaleLinked(!scaleLinked)}><Link2 size={12}/> Scale values linked</button><button title="Reset skew" onClick={()=>resetSkew(selected)}><RotateCcw size={12}/> Reset skew</button></div>}
               {selected.type === "text" && (
                 <>
                   <label>
