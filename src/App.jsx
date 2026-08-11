@@ -2279,8 +2279,21 @@ function DesignEditor({ notify }) {
         layer.id === id ? { ...layer, ...values } : layer,
       ),
     );
-  const layerTransform = (layer) => `${layer.perspective ? `perspective(${layer.perspective}px) ` : ""}translate(${layer.x || 0}px,${layer.y || 0}px) rotate(${layer.rotation || 0}deg) skew(${layer.skewX || 0}deg,${layer.skewY || 0}deg) scale(${layer.scaleX || 1},${layer.scaleY || 1})`;
-  const layerPerspectiveStyle = (layer) => layer.perspectivePoints ? { clipPath: `polygon(${layer.perspectivePoints.map((point)=>`${point.x}% ${point.y}%`).join(",")})` } : {};
+  const perspectiveMatrix = (points) => {
+    if (!points) return "";
+    const source = [[0,0],[1,0],[1,1],[0,1]];
+    const matrix = source.flatMap(([x,y], index) => [[x,y,1,0,0,0,-x*points[index].x,-y*points[index].x],[0,0,0,x,y,1,-x*points[index].y,-y*points[index].y]]);
+    const values = matrix.map((row,index) => [...row, index % 2 === 0 ? points[Math.floor(index/2)].x : points[Math.floor(index/2)].y]);
+    for (let i=0;i<8;i++) { let pivot=i; for(let j=i+1;j<8;j++) if(Math.abs(values[j][i])>Math.abs(values[pivot][i])) pivot=j; [values[i],values[pivot]]=[values[pivot],values[i]]; const divisor=values[i][i]||1; for(let j=i;j<=8;j++) values[i][j]/=divisor; for(let k=0;k<8;k++) if(k!==i){const factor=values[k][i];for(let j=i;j<=8;j++) values[k][j]-=factor*values[i][j];} }
+    const [a,b,c,d,e,f,g,h] = values.map((row)=>row[8]);
+    return `matrix3d(${a},${d},0,${g},${b},${e},0,${h},0,0,1,0,${c},${f},0,1)`;
+  };
+  const layerTransform = (layer) => {
+    const points = layer.perspectivePoints;
+    const perspective = points ? `perspective(${layer.perspective || 700}px) rotateX(${((points[2].y + points[3].y - points[0].y - points[1].y) / 4) * 0.45}deg) rotateY(${((points[1].x + points[2].x - points[0].x - points[3].x) / 4) * -0.45}deg)` : "";
+    return `${perspective} translate(${layer.x || 0}px,${layer.y || 0}px) rotate(${layer.rotation || 0}deg) skew(${layer.skewX || 0}deg,${layer.skewY || 0}deg) scale(${layer.scaleX || 1},${layer.scaleY || 1})`;
+  };
+  const layerPerspectiveStyle = () => ({});
   const beginTransform = (e, type, layer) => {
     if (!layer || layer.locked) return;
     e.preventDefault();
